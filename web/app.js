@@ -1,3 +1,8 @@
+const NODE_WIDTH = 190;
+const NODE_HEIGHT = 108;
+const NODE_PORT_Y = 54;
+const CANVAS_PADDING = 16;
+
 const NODE_BLUEPRINTS = {
   camera: {
     title: "Camera Loader",
@@ -87,6 +92,7 @@ const state = {
   lastFpsAt: performance.now(),
   lastInferenceAt: 0,
   dragging: null,
+  connecting: null,
 };
 
 const els = {};
@@ -94,7 +100,7 @@ const els = {};
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
   bindEvents();
-  renderWorkflow();
+  updateNodeStatuses();
   renderInspector();
   renderEdges();
   listCameras();
@@ -146,7 +152,25 @@ function bindEvents() {
   document.getElementById("resetWorkflow").addEventListener("click", resetWorkflow);
 
   document.querySelectorAll(".palette-item").forEach((button) => {
+    button.draggable = true;
     button.addEventListener("click", () => selectNodeByType(button.dataset.type));
+    button.addEventListener("dragstart", (event) => {
+      event.dataTransfer.setData("application/x-node-type", button.dataset.type);
+      event.dataTransfer.effectAllowed = "copy";
+    });
+  });
+
+  els.workflowCanvas.addEventListener("dragover", (event) => {
+    if (!Array.from(event.dataTransfer.types).includes("application/x-node-type")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  });
+  els.workflowCanvas.addEventListener("drop", (event) => {
+    const type = event.dataTransfer.getData("application/x-node-type");
+    if (!type) return;
+    event.preventDefault();
+    const point = canvasPoint(event);
+    addNodeToCanvas(type, point.x - NODE_WIDTH / 2, point.y - NODE_HEIGHT / 2);
   });
 
   window.addEventListener("resize", () => {
@@ -155,7 +179,15 @@ function bindEvents() {
   });
 
   document.addEventListener("pointermove", onDragMove);
-  document.addEventListener("pointerup", stopDrag);
+  document.addEventListener("pointermove", onConnectionMove);
+  document.addEventListener("pointerup", stopPointerAction);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Delete" || event.key === "Backspace") {
+      const active = document.activeElement;
+      if (active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName)) return;
+      if (state.selectedNodeId) removeNode(state.selectedNodeId);
+    }
+  });
 }
 
 async function listCameras() {
@@ -204,7 +236,7 @@ function resetWorkflow() {
   state.workflow = structuredClone(DEFAULT_WORKFLOW);
   state.selectedNodeId = "camera";
   saveWorkflow();
-  renderWorkflow();
+  updateNodeStatuses();
   renderInspector();
   renderEdges();
 }
@@ -217,7 +249,7 @@ function renderWorkflow() {
     element.style.transform = `translate(${node.x}px, ${node.y}px)`;
     element.dataset.nodeId = node.id;
     element.innerHTML = `
-      ${node.type !== "camera" ? '<span class="node-port in"></span>' : ""}
+      <span class="node-port in" data-port="in" title="Connect input"></span>
       <div class="node-title-row">
         <span class="node-title">${escapeHtml(node.title)}</span>
         <span class="status-pill ${node.enabled ? "" : "paused"}">${node.enabled ? node.status : "off"}</span>
@@ -226,10 +258,14 @@ function renderWorkflow() {
       <div class="node-actions">
         <button class="mini-button" data-action="select">Config</button>
         <button class="mini-button" data-action="toggle">${node.enabled ? "Disable" : "Enable"}</button>
+        <button class="mini-button danger" data-action="remove" title="Remove node">Remove</button>
       </div>
-      ${node.type !== "alert" ? '<span class="node-port out"></span>' : ""}
+      <span class="node-port out" data-port="out" title="Drag to connect"></span>
     `;
     element.addEventListener("pointerdown", (event) => startDrag(event, node.id));
+    element.querySelector('[data-port="out"]').addEventListener("pointerdown", (event) => {
+      startConnection(event, node.id);
+    });
     element.querySelector('[data-action="select"]').addEventListener("click", (event) => {
       event.stopPropagation();
       selectNode(node.id);
@@ -237,6 +273,10 @@ function renderWorkflow() {
     element.querySelector('[data-action="toggle"]').addEventListener("click", (event) => {
       event.stopPropagation();
       toggleNode(node.id);
+    });
+    element.querySelector('[data-action="remove"]').addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeNode(node.id);
     });
     element.addEventListener("click", () => selectNode(node.id));
     els.nodeLayer.appendChild(element);
@@ -247,29 +287,61 @@ function renderEdges() {
   const rect = els.workflowCanvas.getBoundingClientRect();
   els.edgeLayer.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
   els.edgeLayer.innerHTML = "";
-  for (const [fromId, toId] of state.workflow.edges) {
+  state.workflow.edges.forEach(([fromId, toId], index) => {
     const from = state.workflow.nodes.find((node) => node.id === fromId);
     const to = state.workflow.nodes.find((node) => node.id === toId);
-    if (!from || !to) continue;
-    const startX = from.x + 190;
-    const startY = from.y + 54;
+    if (!from || !to) return;
+    const startX = from.x + NODE_WIDTH;
+    const startY = from.y + NODE_PORT_Y;
     const endX = to.x;
-    const endY = to.y + 54;
-    const direction = endX >= startX ? 1 : -1;
-    const curve = Math.max(70, Math.abs(endX - startX) / 2);
+    const endY = to.y + NODE_PORT_Y;
+    const d = connectionPath(startX, startY, endX, endY);
+    const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    hitPath.setAttribute("d", d);
+    hitPath.setAttribute("fill", "none");
+    hitPath.setAttribute("stroke", "transparent");
+    hitPath.setAttribute("stroke-width", "16");
+    hitPath.setAttribute("stroke-linecap", "round");
+    hitPath.dataset.edgeIndex = String(index);
+    hitPath.classList.add("edge-hit-path");
+    hitPath.addEventListener("click", () => removeEdge(index));
+    els.edgeLayer.appendChild(hitPath);
+
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M ${startX} ${startY} C ${startX + curve * direction} ${startY}, ${endX - curve * direction} ${endY}, ${endX} ${endY}`);
+    path.setAttribute("d", d);
     path.setAttribute("fill", "none");
     path.setAttribute("stroke", "#126b63");
     path.setAttribute("stroke-width", "3");
     path.setAttribute("stroke-linecap", "round");
+    path.classList.add("edge-path");
+    els.edgeLayer.appendChild(path);
+  });
+
+  if (state.connecting) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", connectionPath(
+      state.connecting.startX,
+      state.connecting.startY,
+      state.connecting.currentX,
+      state.connecting.currentY
+    ));
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "#b9432f");
+    path.setAttribute("stroke-width", "3");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-dasharray", "6 6");
+    path.classList.add("edge-path", "preview");
     els.edgeLayer.appendChild(path);
   }
 }
 
 function renderInspector() {
   const node = selectedNode();
-  if (!node) return;
+  if (!node) {
+    els.selectedNodeLabel.textContent = "No node selected";
+    els.nodeForm.innerHTML = '<div class="empty-inspector">Select a node or drag one from the palette.</div>';
+    return;
+  }
   els.selectedNodeLabel.textContent = node.title;
   els.nodeForm.innerHTML = "";
   els.nodeForm.appendChild(makeToggleField("enabled", "Enabled", node.enabled, (checked) => {
@@ -476,8 +548,8 @@ async function startCamera() {
 }
 
 async function loadDetectionModel() {
-  const detector = getNode("detector");
-  if (!detector?.enabled) {
+  const detector = activeDetectorNode();
+  if (!detector) {
     return;
   }
   if (state.model || state.modelLoading) return;
@@ -486,9 +558,12 @@ async function loadDetectionModel() {
   }
   state.modelLoading = true;
   els.modelStatus.textContent = "Loading model";
-  state.model = await window.cocoSsd.load({ base: detector.config.modelBase });
-  state.modelLoading = false;
-  els.modelStatus.textContent = "Model ready";
+  try {
+    state.model = await window.cocoSsd.load({ base: detector.config.modelBase });
+    els.modelStatus.textContent = "Model ready";
+  } finally {
+    state.modelLoading = false;
+  }
 }
 
 function stopWorkflow() {
@@ -516,14 +591,31 @@ function stopCamera() {
 async function processFrame(timestamp) {
   if (!state.running) return;
   updateFps(timestamp);
-  const detector = getNode("detector");
-  const shouldInfer = detector?.enabled && state.model && timestamp - state.lastInferenceAt >= Number(detector.config.intervalMs);
+  const detector = activeDetectorNode();
+  if (detector && !state.model && !state.modelLoading) {
+    loadDetectionModel().catch((error) => {
+      console.error(error);
+      setStatus("Error");
+      updateNodeStatuses("error");
+      logEvent("Model load failed", error.message || "Unable to load detection model.");
+    });
+  }
+  if (!detector) {
+    state.detections = [];
+    state.filteredDetections = [];
+    els.objectCount.textContent = "0";
+    clearCanvas();
+    requestAnimationFrame(processFrame);
+    return;
+  }
+
+  const shouldInfer = state.model && timestamp - state.lastInferenceAt >= Number(detector.config.intervalMs);
   if (shouldInfer) {
     state.lastInferenceAt = timestamp;
     const predictions = await state.model.detect(els.cameraFeed);
     state.detections = predictions.filter((item) => item.score >= Number(detector.config.threshold));
     state.filteredDetections = filterDetections(state.detections);
-    els.objectCount.textContent = String(state.filteredDetections.length);
+    els.objectCount.textContent = String(detectionsForNode("preview").length || detectionsForNode("alert").length);
     drawDetections();
     maybeAlert();
   }
@@ -531,8 +623,8 @@ async function processFrame(timestamp) {
 }
 
 function filterDetections(detections) {
-  const filter = getNode("filter");
-  if (!filter?.enabled) return detections;
+  const filter = activeFilterNode();
+  if (!filter) return detections;
   const classes = filter.config.classes
     .split(",")
     .map((item) => item.trim().toLowerCase())
@@ -547,11 +639,13 @@ function drawDetections() {
   resizeOverlay();
   clearCanvas();
   const preview = getNode("preview");
-  if (!preview?.enabled) return;
+  if (!preview?.enabled || !isGraphNodeActive("preview")) return;
+  const visibleDetections = detectionsForNode("preview");
+  if (!visibleDetections.length) return;
   const ctx = els.overlayCanvas.getContext("2d");
   const scaleX = els.overlayCanvas.width / els.cameraFeed.videoWidth;
   const scaleY = els.overlayCanvas.height / els.cameraFeed.videoHeight;
-  for (const detection of state.filteredDetections) {
+  for (const detection of visibleDetections) {
     const [x, y, width, height] = detection.bbox;
     const boxX = x * scaleX;
     const boxY = y * scaleY;
@@ -592,13 +686,15 @@ function clearCanvas() {
 
 function maybeAlert() {
   const alertNode = getNode("alert");
-  if (!alertNode?.enabled || !state.filteredDetections.length) return;
+  if (!alertNode?.enabled || !isGraphNodeActive("alert")) return;
+  const alertDetections = detectionsForNode("alert");
+  if (!alertDetections.length) return;
   const now = Date.now();
   const cooldownMs = Number(alertNode.config.cooldownSeconds) * 1000;
   if (now - state.lastAlertAt < cooldownMs) return;
   state.lastAlertAt = now;
-  const labels = state.filteredDetections.map((item) => item.class).join(", ");
-  logEvent(alertNode.config.message, `${state.filteredDetections.length} match(es): ${labels}`);
+  const labels = alertDetections.map((item) => item.class).join(", ");
+  logEvent(alertNode.config.message, `${alertDetections.length} match(es): ${labels}`);
 }
 
 function updateFps(timestamp) {
@@ -634,10 +730,79 @@ function selectNodeByType(type) {
 
 function toggleNode(id) {
   const node = getNode(id);
+  if (!node) return;
   node.enabled = !node.enabled;
   renderWorkflow();
   renderInspector();
   updateNodeStatuses();
+}
+
+function addNodeToCanvas(type, x, y) {
+  const existing = state.workflow.nodes.find((node) => node.type === type);
+  const rect = els.workflowCanvas.getBoundingClientRect();
+  if (existing) {
+    existing.x = clamp(x, CANVAS_PADDING, rect.width - NODE_WIDTH - CANVAS_PADDING);
+    existing.y = clamp(y, CANVAS_PADDING, rect.height - NODE_HEIGHT - CANVAS_PADDING);
+    selectNode(existing.id);
+    renderEdges();
+    saveWorkflow();
+    return;
+  }
+
+  const node = makeNode(type, {
+    x: clamp(x, CANVAS_PADDING, rect.width - NODE_WIDTH - CANVAS_PADDING),
+    y: clamp(y, CANVAS_PADDING, rect.height - NODE_HEIGHT - CANVAS_PADDING),
+  });
+  state.workflow.nodes.push(node);
+  selectNode(node.id);
+  renderEdges();
+  saveWorkflow();
+}
+
+function removeNode(id) {
+  const node = getNode(id);
+  if (!node) return;
+  state.workflow.nodes = state.workflow.nodes.filter((item) => item.id !== id);
+  state.workflow.edges = state.workflow.edges.filter(([fromId, toId]) => fromId !== id && toId !== id);
+  if (state.selectedNodeId === id) {
+    state.selectedNodeId = state.workflow.nodes[0]?.id || null;
+  }
+  if (node.type === "detector") {
+    state.model = null;
+    els.modelStatus.textContent = "Model not loaded";
+  }
+  updateNodeStatuses();
+  renderWorkflow();
+  renderInspector();
+  renderEdges();
+  saveWorkflow();
+  logEvent("Node removed", `${node.title} was removed from the workflow.`);
+}
+
+function removeEdge(index) {
+  const [fromId, toId] = state.workflow.edges[index] || [];
+  state.workflow.edges.splice(index, 1);
+  updateNodeStatuses();
+  renderEdges();
+  saveWorkflow();
+  if (fromId && toId) {
+    logEvent("Connection removed", `${edgeLabel(fromId)} -> ${edgeLabel(toId)}`);
+  }
+}
+
+function connectNodes(fromId, toId) {
+  if (!fromId || !toId || fromId === toId) return;
+  const exists = state.workflow.edges.some(([from, to]) => from === fromId && to === toId);
+  if (exists) return;
+  state.workflow.edges.push([fromId, toId]);
+  updateNodeStatuses();
+  renderEdges();
+  saveWorkflow();
+  logEvent("Connection added", `${edgeLabel(fromId)} -> ${edgeLabel(toId)}`);
+}
+
+function edgeLabel(id) {
+  return getNode(id)?.title || id;
 }
 
 function selectedNode() {
@@ -648,43 +813,152 @@ function getNode(id) {
   return state.workflow.nodes.find((node) => node.id === id);
 }
 
+function isGraphNodeActive(id) {
+  const node = getNode(id);
+  if (!node?.enabled) return false;
+  if (id === "camera") return true;
+  return hasActivePath("camera", id);
+}
+
+function activeDetectorNode() {
+  const detector = getNode("detector");
+  return detector?.enabled && hasActivePath("camera", "detector") ? detector : null;
+}
+
+function activeFilterNode() {
+  const filter = getNode("filter");
+  return filter?.enabled && activeDetectorNode() && hasActivePath("detector", "filter") ? filter : null;
+}
+
+function detectionsForNode(id) {
+  if (!isGraphNodeActive(id)) return [];
+  if (activeFilterNode() && hasActivePath("filter", id)) {
+    return state.filteredDetections;
+  }
+  if (activeDetectorNode() && hasActivePath("detector", id)) {
+    return state.detections;
+  }
+  return [];
+}
+
+function hasActivePath(fromId, toId) {
+  const fromNode = getNode(fromId);
+  const toNode = getNode(toId);
+  if (!fromNode?.enabled || !toNode?.enabled) return false;
+  if (fromId === toId) return true;
+
+  const visited = new Set();
+  const queue = [fromId];
+  while (queue.length) {
+    const currentId = queue.shift();
+    if (currentId === toId) return true;
+    if (visited.has(currentId)) continue;
+    visited.add(currentId);
+
+    for (const [edgeFromId, edgeToId] of state.workflow.edges) {
+      if (edgeFromId !== currentId || visited.has(edgeToId)) continue;
+      const nextNode = getNode(edgeToId);
+      if (nextNode?.enabled) queue.push(edgeToId);
+    }
+  }
+  return false;
+}
+
 function setStatus(status) {
   els.workflowStatus.textContent = status;
 }
 
 function updateNodeStatuses(status = null) {
   for (const node of state.workflow.nodes) {
-    node.status = status || (state.running ? "running" : "idle");
+    if (node.id !== "camera" && !isGraphNodeActive(node.id)) {
+      node.status = "unlinked";
+    } else if (status) {
+      node.status = status;
+    } else {
+      node.status = state.running ? "running" : "idle";
+    }
   }
   renderWorkflow();
 }
 
 function startDrag(event, nodeId) {
-  if (event.target.closest("button")) return;
+  if (event.target.closest("button, .node-port")) return;
   const node = getNode(nodeId);
+  if (!node) return;
   const rect = els.workflowCanvas.getBoundingClientRect();
   state.dragging = {
     nodeId,
     offsetX: event.clientX - rect.left - node.x,
     offsetY: event.clientY - rect.top - node.y,
   };
+  event.currentTarget.setPointerCapture?.(event.pointerId);
   selectNode(nodeId);
 }
 
 function onDragMove(event) {
   if (!state.dragging) return;
   const node = getNode(state.dragging.nodeId);
+  if (!node) return;
   const rect = els.workflowCanvas.getBoundingClientRect();
-  node.x = clamp(event.clientX - rect.left - state.dragging.offsetX, 16, rect.width - 210);
-  node.y = clamp(event.clientY - rect.top - state.dragging.offsetY, 16, rect.height - 130);
+  node.x = clamp(event.clientX - rect.left - state.dragging.offsetX, CANVAS_PADDING, rect.width - NODE_WIDTH - CANVAS_PADDING);
+  node.y = clamp(event.clientY - rect.top - state.dragging.offsetY, CANVAS_PADDING, rect.height - NODE_HEIGHT - CANVAS_PADDING);
   renderWorkflow();
   renderEdges();
 }
 
-function stopDrag() {
-  if (!state.dragging) return;
-  state.dragging = null;
-  saveWorkflow();
+function startConnection(event, nodeId) {
+  event.preventDefault();
+  event.stopPropagation();
+  const node = getNode(nodeId);
+  if (!node) return;
+  state.connecting = {
+    fromId: nodeId,
+    startX: node.x + NODE_WIDTH,
+    startY: node.y + NODE_PORT_Y,
+    currentX: node.x + NODE_WIDTH,
+    currentY: node.y + NODE_PORT_Y,
+  };
+  selectNode(nodeId);
+  renderEdges();
+}
+
+function onConnectionMove(event) {
+  if (!state.connecting) return;
+  const point = canvasPoint(event);
+  state.connecting.currentX = point.x;
+  state.connecting.currentY = point.y;
+  renderEdges();
+}
+
+function stopPointerAction(event) {
+  const wasDragging = Boolean(state.dragging);
+  if (state.connecting) {
+    const targetPort = document.elementFromPoint(event.clientX, event.clientY)?.closest(".node-port.in");
+    const toId = targetPort?.closest(".workflow-node")?.dataset.nodeId;
+    connectNodes(state.connecting.fromId, toId);
+    state.connecting = null;
+    renderEdges();
+  }
+  if (state.dragging) {
+    state.dragging = null;
+  }
+  if (wasDragging) {
+    saveWorkflow();
+  }
+}
+
+function canvasPoint(event) {
+  const rect = els.workflowCanvas.getBoundingClientRect();
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  };
+}
+
+function connectionPath(startX, startY, endX, endY) {
+  const direction = endX >= startX ? 1 : -1;
+  const curve = Math.max(70, Math.abs(endX - startX) / 2);
+  return `M ${startX} ${startY} C ${startX + curve * direction} ${startY}, ${endX - curve * direction} ${endY}, ${endX} ${endY}`;
 }
 
 function clamp(value, min, max) {

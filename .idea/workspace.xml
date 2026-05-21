@@ -4,9 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="01b32564-2e7d-419f-956e-bde8ddd43dd5" name="Changes" comment="Added ignore">
+    <list default="true" id="01b32564-2e7d-419f-956e-bde8ddd43dd5" name="Changes" comment="First version, simple webapp workflow with coco ssd">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/web/app.js" beforeDir="false" afterPath="$PROJECT_DIR$/web/app.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/web/styles.css" beforeDir="false" afterPath="$PROJECT_DIR$/web/styles.css" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -19,7 +20,7 @@
     </persistenceIdMap>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="8" />
+    <option name="cachedIndexableFilesCount" value="12" />
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -94,7 +95,15 @@
       <option name="project" value="LOCAL" />
       <updated>1779362184289</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="First version, simple webapp workflow with coco ssd">
+      <option name="closed" value="true" />
+      <created>1779364461651</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1779364461651</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -102,7 +111,8 @@
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Added ignore" />
-    <option name="LAST_COMMIT_MESSAGE" value="Added ignore" />
+    <MESSAGE value="First version, simple webapp workflow with coco ssd" />
+    <option name="LAST_COMMIT_MESSAGE" value="First version, simple webapp workflow with coco ssd" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

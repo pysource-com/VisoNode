@@ -279,6 +279,10 @@ label span,
 #edgeLayer {
   width: 100%;
   height: 100%;
+  pointer-events: auto;
+}
+
+#nodeLayer {
   pointer-events: none;
 }
 
@@ -292,6 +296,8 @@ label span,
   background: #fff;
   box-shadow: var(--shadow);
   user-select: none;
+  cursor: grab;
+  pointer-events: auto;
 }
 
 .workflow-node.selected {
@@ -320,6 +326,8 @@ label span,
   border-radius: 50%;
   background: #fff;
   border: 3px solid var(--primary);
+  cursor: crosshair;
+  z-index: 1;
 }
 
 .node-port.in {
@@ -349,6 +357,7 @@ label span,
 
 .node-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 12px;
 }
@@ -362,6 +371,28 @@ label span,
   color: var(--ink);
   font-size: 12px;
   font-weight: 800;
+}
+
+.mini-button.danger {
+  color: var(--accent);
+}
+
+.edge-path {
+  pointer-events: none;
+}
+
+.edge-hit-path {
+  cursor: pointer;
+  pointer-events: stroke;
+}
+
+.empty-inspector {
+  border: 1px dashed var(--line-strong);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 12px;
 }
 
 .inspector-panel,
