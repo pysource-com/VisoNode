@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>No-Code Vision Builder</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+    <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">CV</span>
+          <div>
+            <h1>No-Code Vision Builder</h1>
+            <p>Camera input, object detection, filtering, preview, and alerts.</p>
+          </div>
+        </div>
+        <div class="run-controls">
+          <button class="icon-button secondary" id="saveWorkflow" title="Save workflow">
+            <i data-lucide="save"></i>
+          </button>
+          <button class="icon-button secondary" id="exportWorkflow" title="Export workflow JSON">
+            <i data-lucide="download"></i>
+          </button>
+          <button class="button secondary" id="stopWorkflow">
+            <i data-lucide="square"></i>
+            Stop
+          </button>
+          <button class="button primary" id="startWorkflow">
+            <i data-lucide="play"></i>
+            Run
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="palette">
+          <div class="panel-heading">
+            <span>Nodes</span>
+            <small>Drag on canvas</small>
+          </div>
+          <button class="palette-item" data-type="camera">
+            <i data-lucide="video"></i>
+            <span>Camera Loader</span>
+          </button>
+          <button class="palette-item" data-type="detector">
+            <i data-lucide="scan-search"></i>
+            <span>Object Detection</span>
+          </button>
+          <button class="palette-item" data-type="filter">
+            <i data-lucide="filter"></i>
+            <span>Class Filter</span>
+          </button>
+          <button class="palette-item" data-type="preview">
+            <i data-lucide="monitor-play"></i>
+            <span>Live Preview</span>
+          </button>
+          <button class="palette-item" data-type="alert">
+            <i data-lucide="bell-ring"></i>
+            <span>Alert Output</span>
+          </button>
+
+          <div class="sample-card">
+            <strong>Sample workflow</strong>
+            <p>Camera -> Detector -> Filter -> Preview -> Alert</p>
+            <button class="button compact secondary" id="resetWorkflow">
+              <i data-lucide="refresh-cw"></i>
+              Reset
+            </button>
+          </div>
+        </aside>
+
+        <section class="canvas-section">
+          <div class="canvas-toolbar">
+            <div>
+              <strong>Workflow</strong>
+              <span id="workflowStatus">Idle</span>
+            </div>
+            <div class="metrics">
+              <span><b id="fpsValue">0</b> fps</span>
+              <span><b id="objectCount">0</b> objects</span>
+            </div>
+          </div>
+          <div class="workflow-canvas" id="workflowCanvas">
+            <svg id="edgeLayer" aria-hidden="true"></svg>
+            <div id="nodeLayer"></div>
+          </div>
+        </section>
+
+        <aside class="inspector">
+          <section class="inspector-panel">
+            <div class="panel-heading">
+              <span>Inspector</span>
+              <small id="selectedNodeLabel">Camera Loader</small>
+            </div>
+            <form id="nodeForm"></form>
+          </section>
+
+          <section class="preview-panel">
+            <div class="panel-heading">
+              <span>Live View</span>
+              <small id="modelStatus">Model not loaded</small>
+            </div>
+            <div class="video-stage">
+              <video id="cameraFeed" autoplay muted playsinline></video>
+              <canvas id="overlayCanvas"></canvas>
+              <div class="empty-state" id="emptyState">
+                <i data-lucide="camera"></i>
+                <span>Run the workflow to open a camera.</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="event-panel">
+            <div class="panel-heading">
+              <span>Events</span>
+              <small>Last detections</small>
+            </div>
+            <ul id="eventLog"></ul>
+          </section>
+        </aside>
+      </main>
+    </div>
+  </body>
+</html>
