@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
+import subprocess
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -68,6 +71,45 @@ def read_json_body(handler: SimpleHTTPRequestHandler) -> dict:
     if content_length <= 0:
         raise ValueError("Missing request body.")
     return json.loads(handler.rfile.read(content_length).decode("utf-8"))
+
+
+def open_external_terminal() -> str:
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        windows_terminal = shutil.which("wt.exe") or shutil.which("wt")
+        if windows_terminal:
+            subprocess.Popen(
+                [windows_terminal, "-d", str(ROOT)],
+                cwd=str(ROOT),
+                creationflags=creationflags,
+            )
+            return "Opened Windows Terminal"
+
+        shell_path = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+        if shell_path:
+            subprocess.Popen(
+                [shell_path, "-NoExit", "-Command", "Set-Location -LiteralPath $PWD"],
+                cwd=str(ROOT),
+                creationflags=creationflags,
+            )
+            return f"Opened {Path(shell_path).name}"
+
+        subprocess.Popen(["cmd.exe", "/K"], cwd=str(ROOT), creationflags=creationflags)
+        return "Opened Command Prompt"
+
+    candidates = (
+        ("x-terminal-emulator", []),
+        ("gnome-terminal", ["--working-directory", str(ROOT)]),
+        ("konsole", ["--workdir", str(ROOT)]),
+        ("xfce4-terminal", ["--working-directory", str(ROOT)]),
+        ("xterm", ["-e", f"cd {ROOT} && exec sh"]),
+    )
+    for executable, args in candidates:
+        path = shutil.which(executable)
+        if path:
+            subprocess.Popen([path, *args], cwd=str(ROOT), start_new_session=True)
+            return f"Opened {executable}"
+    raise RuntimeError("No supported external terminal application was found.")
 
 
 def load_yolo_model(model_name: str):
@@ -461,6 +503,11 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
                 return
             if path == "/api/workflow/stop":
                 json_response(self, 200, runner.stop())
+                return
+            if path == "/api/terminal/open":
+                message = open_external_terminal()
+                terminal_log(f"{message} in {ROOT}")
+                json_response(self, 200, {"message": message, "cwd": str(ROOT)})
                 return
             json_response(self, 404, {"error": "Not found"})
         except Exception as exc:

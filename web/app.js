@@ -164,6 +164,7 @@ function cacheElements() {
   els.terminalBody = document.getElementById("terminalBody");
   els.terminalToggle = document.getElementById("terminalToggle");
   els.terminalClear = document.getElementById("terminalClear");
+  els.terminalOpen = document.getElementById("terminalOpen");
   els.terminalStatus = document.getElementById("terminalStatus");
   els.contextMenu = document.getElementById("nodeContextMenu");
 }
@@ -223,6 +224,10 @@ function bindEvents() {
   els.terminalClear.addEventListener("click", (event) => {
     event.stopPropagation();
     els.terminalBody.innerHTML = "";
+  });
+  els.terminalOpen.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openExternalTerminal();
   });
   els.terminalBody.addEventListener("scroll", () => {
     const body = els.terminalBody;
@@ -912,6 +917,27 @@ async function pollTerminal() {
     }
   } catch (error) {
     setTerminalStatus("disconnected", "Disconnected");
+  }
+}
+
+async function openExternalTerminal() {
+  try {
+    const response = await fetch("/api/terminal/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Could not open external terminal.");
+    }
+    pollTerminal();
+  } catch (error) {
+    appendTerminalLines([
+      {
+        time: new Date().toLocaleTimeString([], { hour12: false }),
+        text: `ERROR: ${error.message}`,
+      },
+    ]);
   }
 }
 
