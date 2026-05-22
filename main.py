@@ -6,7 +6,7 @@ import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Lock, Thread
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
@@ -14,9 +14,43 @@ WEB_ROOT = ROOT / "web"
 YOLO26_MODELS = ("yolo26n.pt", "yolo26s.pt", "yolo26m.pt", "yolo26l.pt", "yolo26x.pt")
 YOLO26_MODEL_SET = set(YOLO26_MODELS)
 MAX_EVENTS = 32
+MAX_TERMINAL_LINES = 500
 
 _model_cache = {}
 _model_lock = Lock()
+
+
+class TerminalBuffer:
+    def __init__(self, max_lines: int = MAX_TERMINAL_LINES) -> None:
+        self._lock = Lock()
+        self._lines: list[dict] = []
+        self._seq = 0
+        self._max = max_lines
+
+    def append(self, text: str) -> None:
+        with self._lock:
+            self._seq += 1
+            self._lines.append({
+                "seq": self._seq,
+                "time": time.strftime("%H:%M:%S"),
+                "text": text,
+            })
+            overflow = len(self._lines) - self._max
+            if overflow > 0:
+                del self._lines[:overflow]
+
+    def since(self, cursor: int) -> dict:
+        with self._lock:
+            new_lines = [line for line in self._lines if line["seq"] > cursor]
+            return {"cursor": self._seq, "lines": new_lines}
+
+
+terminal = TerminalBuffer()
+
+
+def terminal_log(text: str) -> None:
+    print(text, flush=True)
+    terminal.append(text)
 
 
 def json_response(handler: SimpleHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -225,6 +259,8 @@ class WorkflowRunner:
                 "error": None,
                 "events": [],
             })
+        self._add_terminal("Workflow launched from browser Run button")
+        self._add_terminal("Starting workflow runner")
         self._thread = Thread(target=self._run, args=(workflow,), daemon=True)
         self._thread.start()
         return self.status()
@@ -242,7 +278,10 @@ class WorkflowRunner:
 
     def status(self) -> dict:
         with self._lock:
-            return dict(self._status, events=list(self._status["events"]))
+            return dict(
+                self._status,
+                events=list(self._status["events"]),
+            )
 
     def _run(self, workflow: dict) -> None:
         import cv2
@@ -253,6 +292,7 @@ class WorkflowRunner:
         frame_count = 0
         last_inference_at = 0.0
         last_alert_at = 0.0
+        last_terminal_detection_at = 0.0
         detections: list[dict] = []
         filtered: list[dict] = []
         try:
@@ -270,6 +310,9 @@ class WorkflowRunner:
                 capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
             if not capture.isOpened():
                 raise RuntimeError(f"Unable to open camera source {source!r}.")
+            actual_width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            actual_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            self._add_terminal(f"Opened camera source {source!r} ({actual_width}x{actual_height})")
 
             detector = active_detector_node(workflow)
             if detector:
@@ -277,12 +320,16 @@ class WorkflowRunner:
                 if engine != "yolo26":
                     raise RuntimeError("Backend runtime supports Ultralytics YOLO26 only.")
                 model_name = detector.get("config", {}).get("yoloModel") or "yolo26n.pt"
+                self._add_terminal(f"Loading detector model {model_name}")
                 load_yolo_model(model_name)
                 self._set_status(state="running", model=model_name)
+                self._add_terminal(f"Loaded detector model {model_name}")
             else:
                 self._set_status(state="running")
+                self._add_terminal("No detector node is active; streaming camera frames only")
 
             self._add_event("Workflow running", "Python is capturing, processing, and displaying frames with OpenCV.")
+            self._add_terminal("Workflow running")
 
             while not self._stop_event.is_set():
                 ok, frame = capture.read()
@@ -299,6 +346,15 @@ class WorkflowRunner:
                         threshold = float(detector.get("config", {}).get("threshold", 0.55))
                         detections = [item for item in detections if float(item.get("score", 0)) >= threshold]
                         filtered = filter_detections(workflow, detections)
+                        if detections and now - last_terminal_detection_at >= 1:
+                            last_terminal_detection_at = now
+                            labels = ", ".join(
+                                f"{item.get('class', 'object')}:{float(item.get('score', 0)):.2f}"
+                                for item in detections[:6]
+                            )
+                            if len(detections) > 6:
+                                labels = f"{labels}, +{len(detections) - 6} more"
+                            self._add_terminal(f"Detected {len(detections)} object(s): {labels}")
 
                 preview = enabled_node(workflow, "preview")
                 display_frame = frame.copy()
@@ -323,6 +379,7 @@ class WorkflowRunner:
                             str(alert_node.get("config", {}).get("message") or "Detected target object"),
                             f"{len(alert_detections)} match(es): {labels}",
                         )
+                        self._add_terminal(f"Alert emitted for {len(alert_detections)} match(es): {labels}")
 
                 frame_count += 1
                 elapsed = now - last_fps_at
@@ -338,6 +395,7 @@ class WorkflowRunner:
         except Exception as exc:
             self._set_status(running=False, state="error", error=str(exc))
             self._add_event("Workflow error", str(exc))
+            self._add_terminal(f"ERROR: {exc}")
         finally:
             if capture is not None:
                 capture.release()
@@ -345,6 +403,7 @@ class WorkflowRunner:
             if self._stop_event.is_set():
                 self._set_status(running=False, state="stopped", fps=0, objectCount=0)
                 self._add_event("Workflow stopped", "Python runtime stopped and released the camera.")
+                self._add_terminal("Workflow stopped")
 
     def _set_status(self, **updates) -> None:
         with self._lock:
@@ -360,6 +419,9 @@ class WorkflowRunner:
             self._status["events"].insert(0, event)
             del self._status["events"][MAX_EVENTS:]
 
+    def _add_terminal(self, line: str) -> None:
+        terminal_log(line)
+
 
 runner = WorkflowRunner()
 
@@ -369,12 +431,21 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/yolo26/models":
             json_response(self, 200, {"models": list(YOLO26_MODELS)})
             return
         if path == "/api/workflow/status":
             json_response(self, 200, runner.status())
+            return
+        if path == "/api/terminal/logs":
+            cursor_raw = parse_qs(parsed.query).get("since", ["0"])[0]
+            try:
+                cursor = int(cursor_raw)
+            except ValueError:
+                cursor = 0
+            json_response(self, 200, terminal.since(cursor))
             return
         super().do_GET()
 
@@ -412,9 +483,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     server = ThreadingHTTPServer((args.host, args.port), NoCacheHandler)
-    print(f"No-code vision builder running at http://{args.host}:{args.port}")
-    print("The browser edits the workflow; Python owns capture, inference, and OpenCV display.")
-    print("Press Ctrl+C to stop.")
+    terminal_log(f"No-code vision builder running at http://{args.host}:{args.port}")
+    terminal_log("The browser edits the workflow; Python owns capture, inference, and OpenCV display.")
+    terminal_log("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
     finally:

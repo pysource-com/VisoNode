@@ -92,6 +92,10 @@ const state = {
   statusPollTimer: null,
   dragging: null,
   connecting: null,
+  terminalCursor: 0,
+  terminalPollTimer: null,
+  terminalAutoScroll: true,
+  contextMenuNodeId: null,
 };
 
 const els = {};
@@ -103,6 +107,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderInspector();
   renderEdges();
   pollBackendStatus();
+  startTerminalPolling();
   logEvent("Workflow ready", "The browser edits graph connections; Python runs the camera pipeline.");
   if (window.lucide) {
     window.lucide.createIcons();
@@ -131,7 +136,7 @@ function normalizeWorkflow(workflow) {
   for (const node of workflow.nodes || []) {
     const blueprint = NODE_BLUEPRINTS[node.type];
     if (!blueprint) continue;
-    node.title = blueprint.title;
+    node.title = node.customTitle || blueprint.title;
     node.subtitle = blueprint.subtitle;
     node.config = { ...blueprint.config, ...(node.config || {}) };
     if (node.type === "camera" && node.config.source === undefined) {
@@ -151,11 +156,16 @@ function cacheElements() {
   els.nodeForm = document.getElementById("nodeForm");
   els.selectedNodeLabel = document.getElementById("selectedNodeLabel");
   els.workflowStatus = document.getElementById("workflowStatus");
-  els.modelStatus = document.getElementById("modelStatus");
-  els.runtimeDetail = document.getElementById("runtimeDetail");
   els.eventLog = document.getElementById("eventLog");
   els.fpsValue = document.getElementById("fpsValue");
   els.objectCount = document.getElementById("objectCount");
+  els.terminalPanel = document.getElementById("terminalPanel");
+  els.terminalHeader = document.getElementById("terminalHeader");
+  els.terminalBody = document.getElementById("terminalBody");
+  els.terminalToggle = document.getElementById("terminalToggle");
+  els.terminalClear = document.getElementById("terminalClear");
+  els.terminalStatus = document.getElementById("terminalStatus");
+  els.contextMenu = document.getElementById("nodeContextMenu");
 }
 
 function bindEvents() {
@@ -192,11 +202,49 @@ function bindEvents() {
   document.addEventListener("pointermove", onConnectionMove);
   document.addEventListener("pointerup", stopPointerAction);
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      hideContextMenu();
+      return;
+    }
     if (event.key !== "Delete" && event.key !== "Backspace") return;
     const active = document.activeElement;
     if (active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName)) return;
     if (state.selectedNodeId) removeNode(state.selectedNodeId);
   });
+
+  els.terminalHeader.addEventListener("click", (event) => {
+    if (event.target.closest("button")) return;
+    toggleTerminal();
+  });
+  els.terminalToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleTerminal();
+  });
+  els.terminalClear.addEventListener("click", (event) => {
+    event.stopPropagation();
+    els.terminalBody.innerHTML = "";
+  });
+  els.terminalBody.addEventListener("scroll", () => {
+    const body = els.terminalBody;
+    state.terminalAutoScroll = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
+  });
+
+  els.contextMenu.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const action = button.dataset.action;
+    const nodeId = state.contextMenuNodeId;
+    hideContextMenu();
+    if (!nodeId) return;
+    if (action === "delete") removeNode(nodeId);
+    else if (action === "toggle") toggleNode(nodeId);
+    else if (action === "rename") renameNode(nodeId);
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!els.contextMenu.contains(event.target)) hideContextMenu();
+  });
+  window.addEventListener("blur", hideContextMenu);
+  window.addEventListener("resize", hideContextMenu);
 }
 
 function loadWorkflow() {
@@ -283,6 +331,11 @@ function renderWorkflow() {
       removeNode(node.id);
     });
     element.addEventListener("click", () => selectNode(node.id));
+    element.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      selectNode(node.id);
+      showContextMenu(event.clientX, event.clientY, node.id);
+    });
     els.nodeLayer.appendChild(element);
   }
   if (window.lucide) window.lucide.createIcons();
@@ -383,7 +436,6 @@ function renderInspector() {
       ["yolo26x.pt", "YOLO26 extra large"],
     ], (value) => {
       node.config.yoloModel = value;
-      els.modelStatus.textContent = `${value} selected`;
     }));
     els.nodeForm.appendChild(makeNumberField("imgsz", "Image size", node.config.imgsz || 640, 320, 1280, (value) => {
       node.config.imgsz = value;
@@ -571,8 +623,6 @@ function renderBackendStatus(payload) {
   setStatus(titleCase(payload.state || "idle"));
   els.fpsValue.textContent = String(payload.fps || 0);
   els.objectCount.textContent = String(payload.objectCount || 0);
-  els.modelStatus.textContent = payload.model ? `${payload.model} loaded` : "Backend runtime";
-  els.runtimeDetail.textContent = payload.error || (state.running ? "Python owns camera capture, inference, and OpenCV display." : "Stopped");
   updateNodeStatuses(payload.state === "error" ? "error" : state.running ? "running" : "idle");
   if (Array.isArray(payload.events) && payload.events.length) {
     renderEvents(payload.events);
@@ -838,4 +888,109 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+/* ===== Terminal ===== */
+function startTerminalPolling() {
+  if (state.terminalPollTimer) return;
+  pollTerminal();
+  state.terminalPollTimer = window.setInterval(pollTerminal, 500);
+}
+
+async function pollTerminal() {
+  try {
+    const response = await fetch(`/api/terminal/logs?since=${state.terminalCursor}`, { cache: "no-store" });
+    if (!response.ok) {
+      setTerminalStatus("disconnected", "Disconnected");
+      return;
+    }
+    const payload = await response.json();
+    setTerminalStatus("connected", "Connected");
+    if (typeof payload.cursor === "number") state.terminalCursor = payload.cursor;
+    if (Array.isArray(payload.lines) && payload.lines.length) {
+      appendTerminalLines(payload.lines);
+    }
+  } catch (error) {
+    setTerminalStatus("disconnected", "Disconnected");
+  }
+}
+
+function appendTerminalLines(lines) {
+  const fragment = document.createDocumentFragment();
+  for (const line of lines) {
+    const row = document.createElement("div");
+    row.className = `term-line ${classifyTerminalLine(line.text)}`;
+    row.innerHTML = `<span class="term-time">${escapeHtml(line.time || "")}</span><span class="term-text">${escapeHtml(line.text)}</span>`;
+    fragment.appendChild(row);
+  }
+  els.terminalBody.appendChild(fragment);
+  while (els.terminalBody.childElementCount > 800) {
+    els.terminalBody.firstElementChild.remove();
+  }
+  if (state.terminalAutoScroll) {
+    els.terminalBody.scrollTop = els.terminalBody.scrollHeight;
+  }
+}
+
+function classifyTerminalLine(text) {
+  const value = String(text || "");
+  if (/^error\b|^err\b|: error|exception/i.test(value)) return "err";
+  if (/^warn\b|warning/i.test(value)) return "warn";
+  if (/loaded|running|opened|workflow/i.test(value)) return "ok";
+  return "";
+}
+
+function setTerminalStatus(state, label) {
+  if (!els.terminalStatus) return;
+  els.terminalStatus.dataset.state = state;
+  els.terminalStatus.textContent = label;
+}
+
+function toggleTerminal() {
+  const collapsed = els.terminalPanel.dataset.collapsed === "true";
+  els.terminalPanel.dataset.collapsed = collapsed ? "false" : "true";
+  if (!collapsed) return;
+  state.terminalAutoScroll = true;
+  els.terminalBody.scrollTop = els.terminalBody.scrollHeight;
+}
+
+/* ===== Context menu ===== */
+function showContextMenu(clientX, clientY, nodeId) {
+  const node = getNode(nodeId);
+  if (!node) return;
+  state.contextMenuNodeId = nodeId;
+  const toggleLabel = els.contextMenu.querySelector('[data-label="toggle"]');
+  if (toggleLabel) toggleLabel.textContent = node.enabled ? "Disable" : "Enable";
+
+  els.contextMenu.hidden = false;
+  const rect = els.contextMenu.getBoundingClientRect();
+  const x = Math.min(clientX, window.innerWidth - rect.width - 6);
+  const y = Math.min(clientY, window.innerHeight - rect.height - 6);
+  els.contextMenu.style.left = `${Math.max(6, x)}px`;
+  els.contextMenu.style.top = `${Math.max(6, y)}px`;
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function hideContextMenu() {
+  if (!els.contextMenu || els.contextMenu.hidden) return;
+  els.contextMenu.hidden = true;
+  state.contextMenuNodeId = null;
+}
+
+function renameNode(nodeId) {
+  const node = getNode(nodeId);
+  if (!node) return;
+  const current = node.customTitle || node.title || "";
+  const next = window.prompt("Rename node", current);
+  if (next === null) return;
+  const trimmed = next.trim();
+  if (!trimmed) {
+    delete node.customTitle;
+  } else {
+    node.customTitle = trimmed;
+  }
+  node.title = node.customTitle || NODE_BLUEPRINTS[node.type]?.title || node.title;
+  renderWorkflow();
+  renderInspector();
+  saveWorkflow();
 }

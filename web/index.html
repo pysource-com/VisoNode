@@ -98,20 +98,6 @@
             <form id="nodeForm"></form>
           </section>
 
-          <section class="preview-panel">
-            <div class="panel-heading">
-              <span>Backend Runtime</span>
-              <div class="panel-actions">
-                <small id="modelStatus">Backend runtime</small>
-              </div>
-            </div>
-            <div class="runtime-stage">
-              <i data-lucide="monitor-play"></i>
-              <strong>OpenCV display</strong>
-              <span id="runtimeDetail">Stopped</span>
-            </div>
-          </section>
-
           <section class="event-panel">
             <div class="panel-heading">
               <span>Events</span>
@@ -121,6 +107,32 @@
           </section>
         </aside>
       </main>
+
+      <section class="terminal-panel" id="terminalPanel" data-collapsed="false">
+        <header class="terminal-header" id="terminalHeader">
+          <span class="terminal-title">
+            <i data-lucide="terminal"></i>
+            Python backend
+          </span>
+          <span class="terminal-status" id="terminalStatus">Connected</span>
+          <div class="terminal-actions">
+            <button class="mini-button" id="terminalClear" title="Clear terminal output">
+              <i data-lucide="eraser"></i>
+            </button>
+            <button class="mini-button" id="terminalToggle" title="Collapse / expand terminal">
+              <i data-lucide="chevron-down"></i>
+            </button>
+          </div>
+        </header>
+        <div class="terminal-body" id="terminalBody"></div>
+      </section>
+    </div>
+
+    <div class="context-menu" id="nodeContextMenu" hidden>
+      <button data-action="rename"><i data-lucide="pencil"></i>Rename</button>
+      <button data-action="toggle"><i data-lucide="power"></i><span data-label="toggle">Disable</span></button>
+      <div class="context-menu-sep"></div>
+      <button data-action="delete" class="danger"><i data-lucide="trash-2"></i>Delete</button>
     </div>
   </body>
 </html>
