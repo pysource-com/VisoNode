@@ -5,10 +5,10 @@ A first-pass no-code computer vision workflow builder, similar in spirit to n8n 
 The included sample workflow is:
 
 ```text
-Camera Loader -> Object Detection -> Class Filter -> Live Preview -> Alert Output
+Camera Loader -> Object Detection -> Class Filter -> OpenCV Preview -> Alert Output
 ```
 
-The app runs locally and uses the browser camera APIs. Object detection can run through a local Ultralytics YOLO26 backend or the original TensorFlow.js COCO-SSD browser model.
+The app runs locally. The browser is only the workflow editor: it sends the graph and node settings to Python. Python owns camera capture, YOLO26 inference, filtering, alert generation, and preview display through OpenCV.
 
 ## Run
 
@@ -28,19 +28,19 @@ Open:
 http://127.0.0.1:8000
 ```
 
-Camera access works on `localhost`/`127.0.0.1` in modern browsers. Click **Run**, grant camera permission, then adjust the nodes in the inspector. The first YOLO26 run downloads the selected Ultralytics weights, such as `yolo26n.pt`.
+Open the editor, configure the graph, then click **Run**. Python opens the configured OpenCV camera source, processes frames according to the active node connections, and displays the output in a native OpenCV window. Press **Stop**, `q`, or `Esc` to stop the runtime. The first YOLO26 run downloads the selected Ultralytics weights, such as `yolo26n.pt`.
 
 ## Current nodes
 
-- Camera Loader: chooses camera, resolution, and facing mode.
-- Object Detection: selects Ultralytics YOLO26 or browser COCO-SSD, confidence threshold, and inference interval.
+- Camera Loader: chooses the OpenCV source, resolution, and capture settings.
+- Object Detection: selects Ultralytics YOLO26 model, confidence threshold, and inference interval.
 - Class Filter: passes only configured classes such as `person, car, dog`.
-- Live Preview: draws bounding boxes and labels, with a fullscreen preview button.
-- Alert Output: writes detection events with a cooldown.
+- OpenCV Preview: draws bounding boxes and labels in a native OpenCV window.
+- Alert Output: writes backend detection events with a cooldown.
 
 ## Next useful steps
 
 - Add persisted workflow import.
-- Add RTSP/IP camera loading through a backend worker.
-- Add backend inference nodes for YOLO/ONNX/TensorRT.
+- Add RTSP/IP camera presets.
+- Add inference nodes for ONNX/TensorRT.
 - Add webhook, database, and snapshot output nodes.

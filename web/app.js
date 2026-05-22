@@ -6,19 +6,18 @@ const CANVAS_PADDING = 16;
 const NODE_BLUEPRINTS = {
   camera: {
     title: "Camera Loader",
-    subtitle: "Browser webcam or capture card",
+    subtitle: "Python OpenCV capture",
     x: 44,
     y: 72,
     config: {
-      deviceId: "",
+      source: 0,
       width: 1280,
       height: 720,
-      facingMode: "environment",
     },
   },
   detector: {
     title: "Object Detection",
-    subtitle: "YOLO26 or browser COCO-SSD",
+    subtitle: "Backend Ultralytics YOLO26",
     x: 332,
     y: 72,
     config: {
@@ -28,7 +27,6 @@ const NODE_BLUEPRINTS = {
       yoloModel: "yolo26n.pt",
       imgsz: 640,
       end2end: true,
-      modelBase: "lite_mobilenet_v2",
     },
   },
   filter: {
@@ -42,8 +40,8 @@ const NODE_BLUEPRINTS = {
     },
   },
   preview: {
-    title: "Live Preview",
-    subtitle: "Draw boxes and labels",
+    title: "OpenCV Preview",
+    subtitle: "Python display window",
     x: 44,
     y: 400,
     config: {
@@ -53,7 +51,7 @@ const NODE_BLUEPRINTS = {
   },
   alert: {
     title: "Alert Output",
-    subtitle: "Browser event log",
+    subtitle: "Backend event log",
     x: 332,
     y: 400,
     config: {
@@ -80,22 +78,10 @@ const DEFAULT_WORKFLOW = {
 };
 
 const state = {
-  workflow: loadWorkflow(),
+  workflow: normalizeWorkflow(loadWorkflow()),
   selectedNodeId: "camera",
-  stream: null,
-  model: null,
   running: false,
-  modelLoading: false,
-  captureCanvas: document.createElement("canvas"),
-  cameraDevices: [],
-  detections: [],
-  filteredDetections: [],
-  lastDetectionAt: 0,
-  lastAlertAt: 0,
-  frameCounter: 0,
-  fps: 0,
-  lastFpsAt: performance.now(),
-  lastInferenceAt: 0,
+  statusPollTimer: null,
   dragging: null,
   connecting: null,
 };
@@ -108,8 +94,8 @@ document.addEventListener("DOMContentLoaded", () => {
   updateNodeStatuses();
   renderInspector();
   renderEdges();
-  listCameras();
-  logEvent("Workflow ready", "Configure nodes, then run the sample pipeline.");
+  pollBackendStatus();
+  logEvent("Workflow ready", "The browser edits graph connections; Python runs the camera pipeline.");
   if (window.lucide) {
     window.lucide.createIcons();
   }
@@ -133,6 +119,23 @@ function makeNode(type, overrides = {}) {
   };
 }
 
+function normalizeWorkflow(workflow) {
+  for (const node of workflow.nodes || []) {
+    const blueprint = NODE_BLUEPRINTS[node.type];
+    if (!blueprint) continue;
+    node.title = blueprint.title;
+    node.subtitle = blueprint.subtitle;
+    node.config = { ...blueprint.config, ...(node.config || {}) };
+    if (node.type === "camera" && node.config.source === undefined) {
+      node.config.source = /^\d+$/.test(String(node.config.deviceId || "")) ? Number(node.config.deviceId) : 0;
+    }
+    if (node.type === "detector") {
+      node.config.engine = "yolo26";
+    }
+  }
+  return workflow;
+}
+
 function cacheElements() {
   els.workflowCanvas = document.getElementById("workflowCanvas");
   els.nodeLayer = document.getElementById("nodeLayer");
@@ -141,11 +144,7 @@ function cacheElements() {
   els.selectedNodeLabel = document.getElementById("selectedNodeLabel");
   els.workflowStatus = document.getElementById("workflowStatus");
   els.modelStatus = document.getElementById("modelStatus");
-  els.cameraFeed = document.getElementById("cameraFeed");
-  els.overlayCanvas = document.getElementById("overlayCanvas");
-  els.videoStage = document.querySelector(".video-stage");
-  els.fullscreenPreview = document.getElementById("fullscreenPreview");
-  els.emptyState = document.getElementById("emptyState");
+  els.runtimeDetail = document.getElementById("runtimeDetail");
   els.eventLog = document.getElementById("eventLog");
   els.fpsValue = document.getElementById("fpsValue");
   els.objectCount = document.getElementById("objectCount");
@@ -157,8 +156,6 @@ function bindEvents() {
   document.getElementById("saveWorkflow").addEventListener("click", saveWorkflow);
   document.getElementById("exportWorkflow").addEventListener("click", exportWorkflow);
   document.getElementById("resetWorkflow").addEventListener("click", resetWorkflow);
-  els.fullscreenPreview.addEventListener("click", togglePreviewFullscreen);
-  document.addEventListener("fullscreenchange", updateFullscreenButton);
 
   document.querySelectorAll(".palette-item").forEach((button) => {
     button.draggable = true;
@@ -182,31 +179,16 @@ function bindEvents() {
     addNodeToCanvas(type, point.x - NODE_WIDTH / 2, point.y - NODE_HEIGHT / 2);
   });
 
-  window.addEventListener("resize", () => {
-    renderEdges();
-    drawDetections();
-  });
-
+  window.addEventListener("resize", renderEdges);
   document.addEventListener("pointermove", onDragMove);
   document.addEventListener("pointermove", onConnectionMove);
   document.addEventListener("pointerup", stopPointerAction);
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Delete" || event.key === "Backspace") {
-      const active = document.activeElement;
-      if (active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName)) return;
-      if (state.selectedNodeId) removeNode(state.selectedNodeId);
-    }
+    if (event.key !== "Delete" && event.key !== "Backspace") return;
+    const active = document.activeElement;
+    if (active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName)) return;
+    if (state.selectedNodeId) removeNode(state.selectedNodeId);
   });
-}
-
-async function listCameras() {
-  if (!navigator.mediaDevices?.enumerateDevices) {
-    logEvent("Camera API unavailable", "Use a modern browser on localhost or HTTPS.");
-    return;
-  }
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  state.cameraDevices = devices.filter((device) => device.kind === "videoinput");
-  renderInspector();
 }
 
 function loadWorkflow() {
@@ -225,11 +207,13 @@ function loadWorkflow() {
 }
 
 function saveWorkflow() {
+  normalizeWorkflow(state.workflow);
   localStorage.setItem("visionWorkflow", JSON.stringify(state.workflow));
   logEvent("Workflow saved", "The graph and node settings were stored in this browser.");
 }
 
 function exportWorkflow() {
+  normalizeWorkflow(state.workflow);
   const payload = JSON.stringify(state.workflow, null, 2);
   const blob = new Blob([payload], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -297,8 +281,8 @@ function renderEdges() {
   els.edgeLayer.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
   els.edgeLayer.innerHTML = "";
   state.workflow.edges.forEach(([fromId, toId], index) => {
-    const from = state.workflow.nodes.find((node) => node.id === fromId);
-    const to = state.workflow.nodes.find((node) => node.id === toId);
+    const from = getNode(fromId);
+    const to = getNode(toId);
     if (!from || !to) return;
     const startX = from.x + NODE_WIDTH;
     const startY = from.y + NODE_PORT_Y;
@@ -360,14 +344,8 @@ function renderInspector() {
   }));
 
   if (node.type === "camera") {
-    els.nodeForm.appendChild(makeSelectField("deviceId", "Camera", node.config.deviceId, cameraOptions(), (value) => {
-      node.config.deviceId = value;
-    }));
-    els.nodeForm.appendChild(makeSelectField("facingMode", "Facing mode", node.config.facingMode, [
-      ["environment", "Rear / environment"],
-      ["user", "Front / user"],
-    ], (value) => {
-      node.config.facingMode = value;
+    els.nodeForm.appendChild(makeTextField("source", "OpenCV source", node.config.source, (value) => {
+      node.config.source = /^\d+$/.test(value) ? Number(value) : value;
     }));
     els.nodeForm.appendChild(makeNumberField("width", "Width", node.config.width, 320, 3840, (value) => {
       node.config.width = value;
@@ -378,50 +356,29 @@ function renderInspector() {
   }
 
   if (node.type === "detector") {
-    const engine = detectorEngine(node);
-    els.nodeForm.appendChild(makeSelectField("engine", "Engine", engine, [
-      ["yolo26", "Ultralytics YOLO26"],
-      ["cocoSsd", "Browser COCO-SSD"],
-    ], (value) => {
-      node.config.engine = value;
-      state.model = null;
-      els.modelStatus.textContent = value === "yolo26" ? "YOLO26 backend selected" : "Model changed";
-      renderInspector();
-    }));
+    node.config.engine = "yolo26";
     els.nodeForm.appendChild(makeRangeField("threshold", "Confidence", node.config.threshold, 0.1, 0.95, 0.05, (value) => {
       node.config.threshold = value;
     }));
     els.nodeForm.appendChild(makeNumberField("intervalMs", "Inference interval ms", node.config.intervalMs, 150, 2000, (value) => {
       node.config.intervalMs = value;
     }));
-    if (engine === "yolo26") {
-      els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 model", node.config.yoloModel || "yolo26n.pt", [
-        ["yolo26n.pt", "YOLO26 nano"],
-        ["yolo26s.pt", "YOLO26 small"],
-        ["yolo26m.pt", "YOLO26 medium"],
-        ["yolo26l.pt", "YOLO26 large"],
-        ["yolo26x.pt", "YOLO26 extra large"],
-      ], (value) => {
-        node.config.yoloModel = value;
-        els.modelStatus.textContent = "YOLO26 model changed";
-      }));
-      els.nodeForm.appendChild(makeNumberField("imgsz", "Image size", node.config.imgsz || 640, 320, 1280, (value) => {
-        node.config.imgsz = value;
-      }));
-      els.nodeForm.appendChild(makeToggleField("end2end", "End-to-end head", node.config.end2end ?? true, (checked) => {
-        node.config.end2end = checked;
-      }));
-    } else {
-      els.nodeForm.appendChild(makeSelectField("modelBase", "Model", node.config.modelBase || "lite_mobilenet_v2", [
-        ["lite_mobilenet_v2", "Fast mobile model"],
-        ["mobilenet_v1", "Balanced model"],
-        ["mobilenet_v2", "More accurate model"],
-      ], (value) => {
-        node.config.modelBase = value;
-        state.model = null;
-        els.modelStatus.textContent = "Model changed";
-      }));
-    }
+    els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 model", node.config.yoloModel || "yolo26n.pt", [
+      ["yolo26n.pt", "YOLO26 nano"],
+      ["yolo26s.pt", "YOLO26 small"],
+      ["yolo26m.pt", "YOLO26 medium"],
+      ["yolo26l.pt", "YOLO26 large"],
+      ["yolo26x.pt", "YOLO26 extra large"],
+    ], (value) => {
+      node.config.yoloModel = value;
+      els.modelStatus.textContent = `${value} selected`;
+    }));
+    els.nodeForm.appendChild(makeNumberField("imgsz", "Image size", node.config.imgsz || 640, 320, 1280, (value) => {
+      node.config.imgsz = value;
+    }));
+    els.nodeForm.appendChild(makeToggleField("end2end", "End-to-end head", node.config.end2end ?? true, (checked) => {
+      node.config.end2end = checked;
+    }));
   }
 
   if (node.type === "filter") {
@@ -436,11 +393,9 @@ function renderInspector() {
   if (node.type === "preview") {
     els.nodeForm.appendChild(makeToggleField("showBoxes", "Show boxes", node.config.showBoxes, (checked) => {
       node.config.showBoxes = checked;
-      drawDetections();
     }));
     els.nodeForm.appendChild(makeToggleField("showLabels", "Show labels", node.config.showLabels, (checked) => {
       node.config.showLabels = checked;
-      drawDetections();
     }));
   }
 
@@ -452,14 +407,6 @@ function renderInspector() {
       node.config.message = value;
     }));
   }
-}
-
-function cameraOptions() {
-  const options = [["", "Default camera"]];
-  for (const device of state.cameraDevices) {
-    options.push([device.deviceId, device.label || `Camera ${options.length}`]);
-  }
-  return options;
 }
 
 function makeSelectField(name, label, value, options, onChange) {
@@ -475,6 +422,17 @@ function makeSelectField(name, label, value, options, onChange) {
   }
   select.addEventListener("change", () => onChange(select.value));
   wrapper.appendChild(select);
+  return wrapper;
+}
+
+function makeTextField(name, label, value, onChange) {
+  const wrapper = makeLabel(label);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.name = name;
+  input.value = String(value ?? "");
+  input.addEventListener("input", () => onChange(input.value));
+  wrapper.appendChild(input);
   return wrapper;
 }
 
@@ -545,16 +503,11 @@ async function startWorkflow() {
   setStatus("Starting");
   updateNodeStatuses("starting");
   try {
-    await startCamera();
-    await listCameras();
-    await loadDetectionModel();
-    state.running = true;
-    state.lastFpsAt = performance.now();
-    state.frameCounter = 0;
-    setStatus("Running");
-    updateNodeStatuses("running");
-    logEvent("Workflow running", "Camera frames are flowing through object detection.");
-    requestAnimationFrame(processFrame);
+    normalizeWorkflow(state.workflow);
+    saveWorkflow();
+    const payload = await postJson("/api/workflow/start", { workflow: state.workflow });
+    renderBackendStatus(payload);
+    startStatusPolling();
   } catch (error) {
     console.error(error);
     setStatus("Error");
@@ -563,233 +516,71 @@ async function startWorkflow() {
   }
 }
 
-async function startCamera() {
-  const camera = getNode("camera");
-  if (!camera?.enabled) {
-    throw new Error("Camera Loader node is disabled.");
-  }
-  stopCamera();
-  const video = {
-    width: { ideal: Number(camera.config.width) || 1280 },
-    height: { ideal: Number(camera.config.height) || 720 },
-  };
-  if (camera.config.deviceId) {
-    video.deviceId = { exact: camera.config.deviceId };
-  } else if (camera.config.facingMode) {
-    video.facingMode = { ideal: camera.config.facingMode };
-  }
-  state.stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
-  els.cameraFeed.srcObject = state.stream;
-  await els.cameraFeed.play();
-  resizeOverlay();
-  els.emptyState.classList.add("hidden");
-}
-
-async function loadDetectionModel() {
-  const detector = activeDetectorNode();
-  if (!detector) {
-    return;
-  }
-  if (detectorEngine(detector) === "yolo26") {
-    state.model = null;
-    els.modelStatus.textContent = `${detector.config.yoloModel || "yolo26n.pt"} backend ready`;
-    return;
-  }
-  if (state.model || state.modelLoading) return;
-  if (!window.cocoSsd) {
-    throw new Error("COCO-SSD library did not load. Check the internet connection for CDN assets.");
-  }
-  state.modelLoading = true;
-  els.modelStatus.textContent = "Loading model";
+async function stopWorkflow() {
   try {
-    state.model = await window.cocoSsd.load({ base: detector.config.modelBase });
-    els.modelStatus.textContent = "Model ready";
-  } finally {
-    state.modelLoading = false;
+    const payload = await postJson("/api/workflow/stop", {});
+    renderBackendStatus(payload);
+  } catch (error) {
+    console.error(error);
+    logEvent("Stop failed", error.message || "Unable to stop workflow.");
   }
 }
 
-function stopWorkflow() {
-  state.running = false;
-  state.detections = [];
-  state.filteredDetections = [];
-  stopCamera();
-  clearCanvas();
-  setStatus("Stopped");
-  updateNodeStatuses("idle");
-  els.emptyState.classList.remove("hidden");
-  els.fpsValue.textContent = "0";
-  els.objectCount.textContent = "0";
-  logEvent("Workflow stopped", "Camera stream closed.");
-}
-
-function stopCamera() {
-  if (state.stream) {
-    state.stream.getTracks().forEach((track) => track.stop());
-    state.stream = null;
-  }
-  els.cameraFeed.srcObject = null;
-}
-
-async function processFrame(timestamp) {
-  if (!state.running) return;
-  updateFps(timestamp);
-  const detector = activeDetectorNode();
-  if (detector && !state.model && !state.modelLoading) {
-    loadDetectionModel().catch((error) => {
-      console.error(error);
-      setStatus("Error");
-      updateNodeStatuses("error");
-      logEvent("Model load failed", error.message || "Unable to load detection model.");
-    });
-  }
-  if (!detector) {
-    state.detections = [];
-    state.filteredDetections = [];
-    els.objectCount.textContent = "0";
-    clearCanvas();
-    requestAnimationFrame(processFrame);
-    return;
-  }
-
-  const shouldInfer = (detectorEngine(detector) === "yolo26" || state.model) && timestamp - state.lastInferenceAt >= Number(detector.config.intervalMs);
-  if (shouldInfer) {
-    state.lastInferenceAt = timestamp;
-    let predictions = [];
-    try {
-      predictions = detectorEngine(detector) === "yolo26"
-        ? await detectWithYolo26(detector)
-        : await state.model.detect(els.cameraFeed);
-    } catch (error) {
-      console.error(error);
-      state.running = false;
-      setStatus("Error");
-      updateNodeStatuses("error");
-      logEvent("Detection failed", error.message || "Unable to run object detection.");
-      return;
-    }
-    state.detections = predictions.filter((item) => item.score >= Number(detector.config.threshold));
-    state.filteredDetections = filterDetections(state.detections);
-    els.objectCount.textContent = String(detectionsForNode("preview").length || detectionsForNode("alert").length);
-    drawDetections();
-    maybeAlert();
-  }
-  requestAnimationFrame(processFrame);
-}
-
-async function detectWithYolo26(detector) {
-  els.modelStatus.textContent = `Running ${detector.config.yoloModel || "yolo26n.pt"}`;
-  const response = await fetch("/api/detect", {
+async function postJson(url, payload) {
+  const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      image: captureFrameDataUrl(),
-      model: detector.config.yoloModel || "yolo26n.pt",
-      threshold: Number(detector.config.threshold),
-      imgsz: Number(detector.config.imgsz) || 640,
-      end2end: detector.config.end2end ?? true,
-    }),
+    body: JSON.stringify(payload),
   });
-  const payload = await response.json();
+  const body = await response.json();
   if (!response.ok) {
-    throw new Error(payload.error || "YOLO26 request failed.");
+    throw new Error(body.error || `${url} failed.`);
   }
-  els.modelStatus.textContent = `${payload.model} ready`;
-  return payload.detections || [];
+  return body;
 }
 
-function captureFrameDataUrl() {
-  const canvas = state.captureCanvas;
-  canvas.width = els.cameraFeed.videoWidth;
-  canvas.height = els.cameraFeed.videoHeight;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(els.cameraFeed, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.82);
+function startStatusPolling() {
+  if (state.statusPollTimer) return;
+  state.statusPollTimer = window.setInterval(pollBackendStatus, 750);
 }
 
-function filterDetections(detections) {
-  const filter = activeFilterNode();
-  if (!filter) return detections;
-  const classes = filter.config.classes
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  const filtered = classes.length
-    ? detections.filter((item) => classes.includes(item.class.toLowerCase()))
-    : detections;
-  return filtered.length >= Number(filter.config.minCount) ? filtered : [];
-}
-
-function drawDetections() {
-  resizeOverlay();
-  clearCanvas();
-  const preview = getNode("preview");
-  if (!preview?.enabled || !isGraphNodeActive("preview")) return;
-  const visibleDetections = detectionsForNode("preview");
-  if (!visibleDetections.length) return;
-  const ctx = els.overlayCanvas.getContext("2d");
-  const scaleX = els.overlayCanvas.width / els.cameraFeed.videoWidth;
-  const scaleY = els.overlayCanvas.height / els.cameraFeed.videoHeight;
-  for (const detection of visibleDetections) {
-    const [x, y, width, height] = detection.bbox;
-    const boxX = x * scaleX;
-    const boxY = y * scaleY;
-    const boxWidth = width * scaleX;
-    const boxHeight = height * scaleY;
-    if (preview.config.showBoxes) {
-      ctx.strokeStyle = "#29d391";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-    }
-    if (preview.config.showLabels) {
-      const label = `${detection.class} ${Math.round(detection.score * 100)}%`;
-      ctx.font = "700 14px system-ui";
-      const labelWidth = ctx.measureText(label).width + 12;
-      ctx.fillStyle = "rgba(8, 18, 27, 0.88)";
-      ctx.fillRect(boxX, Math.max(0, boxY - 26), labelWidth, 24);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(label, boxX + 6, Math.max(16, boxY - 9));
-    }
+async function pollBackendStatus() {
+  try {
+    const response = await fetch("/api/workflow/status", { cache: "no-store" });
+    if (!response.ok) return;
+    renderBackendStatus(await response.json());
+  } catch (error) {
+    console.warn(error);
   }
 }
 
-function resizeOverlay() {
-  if (!els.cameraFeed.videoWidth || !els.cameraFeed.videoHeight) return;
-  if (
-    els.overlayCanvas.width !== els.cameraFeed.videoWidth ||
-    els.overlayCanvas.height !== els.cameraFeed.videoHeight
-  ) {
-    els.overlayCanvas.width = els.cameraFeed.videoWidth;
-    els.overlayCanvas.height = els.cameraFeed.videoHeight;
+function renderBackendStatus(payload) {
+  state.running = Boolean(payload.running);
+  setStatus(titleCase(payload.state || "idle"));
+  els.fpsValue.textContent = String(payload.fps || 0);
+  els.objectCount.textContent = String(payload.objectCount || 0);
+  els.modelStatus.textContent = payload.model ? `${payload.model} loaded` : "Backend runtime";
+  els.runtimeDetail.textContent = payload.error || (state.running ? "Python owns camera capture, inference, and OpenCV display." : "Stopped");
+  updateNodeStatuses(payload.state === "error" ? "error" : state.running ? "running" : "idle");
+  if (Array.isArray(payload.events) && payload.events.length) {
+    renderEvents(payload.events);
+  }
+  if (state.running && !state.statusPollTimer) {
+    state.statusPollTimer = window.setInterval(pollBackendStatus, 750);
+  }
+  if (!state.running && state.statusPollTimer) {
+    window.clearInterval(state.statusPollTimer);
+    state.statusPollTimer = null;
   }
 }
 
-function clearCanvas() {
-  const ctx = els.overlayCanvas.getContext("2d");
-  ctx.clearRect(0, 0, els.overlayCanvas.width, els.overlayCanvas.height);
-}
-
-function maybeAlert() {
-  const alertNode = getNode("alert");
-  if (!alertNode?.enabled || !isGraphNodeActive("alert")) return;
-  const alertDetections = detectionsForNode("alert");
-  if (!alertDetections.length) return;
-  const now = Date.now();
-  const cooldownMs = Number(alertNode.config.cooldownSeconds) * 1000;
-  if (now - state.lastAlertAt < cooldownMs) return;
-  state.lastAlertAt = now;
-  const labels = alertDetections.map((item) => item.class).join(", ");
-  logEvent(alertNode.config.message, `${alertDetections.length} match(es): ${labels}`);
-}
-
-function updateFps(timestamp) {
-  state.frameCounter += 1;
-  const elapsed = timestamp - state.lastFpsAt;
-  if (elapsed >= 1000) {
-    state.fps = Math.round((state.frameCounter * 1000) / elapsed);
-    state.frameCounter = 0;
-    state.lastFpsAt = timestamp;
-    els.fpsValue.textContent = String(state.fps);
+function renderEvents(events) {
+  els.eventLog.innerHTML = "";
+  for (const event of events.slice(0, 8)) {
+    const item = document.createElement("li");
+    const time = event.time ? `${event.time} ` : "";
+    item.innerHTML = `<strong>${escapeHtml(time + event.title)}</strong><span>${escapeHtml(event.detail)}</span>`;
+    els.eventLog.appendChild(item);
   }
 }
 
@@ -852,10 +643,6 @@ function removeNode(id) {
   if (state.selectedNodeId === id) {
     state.selectedNodeId = state.workflow.nodes[0]?.id || null;
   }
-  if (node.type === "detector") {
-    state.model = null;
-    els.modelStatus.textContent = "Model not loaded";
-  }
   updateNodeStatuses();
   renderWorkflow();
   renderInspector();
@@ -905,31 +692,6 @@ function isGraphNodeActive(id) {
   return hasActivePath("camera", id);
 }
 
-function activeDetectorNode() {
-  const detector = getNode("detector");
-  return detector?.enabled && hasActivePath("camera", "detector") ? detector : null;
-}
-
-function detectorEngine(detector) {
-  return detector?.config.engine || "yolo26";
-}
-
-function activeFilterNode() {
-  const filter = getNode("filter");
-  return filter?.enabled && activeDetectorNode() && hasActivePath("detector", "filter") ? filter : null;
-}
-
-function detectionsForNode(id) {
-  if (!isGraphNodeActive(id)) return [];
-  if (activeFilterNode() && hasActivePath("filter", id)) {
-    return state.filteredDetections;
-  }
-  if (activeDetectorNode() && hasActivePath("detector", id)) {
-    return state.detections;
-  }
-  return [];
-}
-
 function hasActivePath(fromId, toId) {
   const fromNode = getNode(fromId);
   const toNode = getNode(toId);
@@ -955,23 +717,6 @@ function hasActivePath(fromId, toId) {
 
 function setStatus(status) {
   els.workflowStatus.textContent = status;
-}
-
-function togglePreviewFullscreen() {
-  if (!document.fullscreenElement) {
-    els.videoStage.requestFullscreen?.();
-    return;
-  }
-  document.exitFullscreen?.();
-}
-
-function updateFullscreenButton() {
-  const isFullscreen = document.fullscreenElement === els.videoStage;
-  els.fullscreenPreview.title = isFullscreen ? "Exit fullscreen live preview" : "Fullscreen live preview";
-  els.fullscreenPreview.innerHTML = `<i data-lucide="${isFullscreen ? "minimize" : "maximize"}"></i>`;
-  if (window.lucide) {
-    window.lucide.createIcons();
-  }
 }
 
 function updateNodeStatuses(status = null) {
@@ -1069,6 +814,10 @@ function connectionPath(startX, startY, endX, endY) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function titleCase(value) {
+  return String(value).slice(0, 1).toUpperCase() + String(value).slice(1);
 }
 
 function escapeHtml(value) {

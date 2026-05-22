@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>No-Code Vision Builder</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
     <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
     <script defer src="./app.js"></script>
   </head>
@@ -17,7 +15,7 @@
           <span class="brand-mark">CV</span>
           <div>
             <h1>No-Code Vision Builder</h1>
-            <p>Camera input, object detection, filtering, preview, and alerts.</p>
+            <p>Browser graph editor for a Python OpenCV vision pipeline.</p>
           </div>
         </div>
         <div class="run-controls">
@@ -58,7 +56,7 @@
           </button>
           <button class="palette-item" data-type="preview">
             <i data-lucide="monitor-play"></i>
-            <span>Live Preview</span>
+            <span>OpenCV Preview</span>
           </button>
           <button class="palette-item" data-type="alert">
             <i data-lucide="bell-ring"></i>
@@ -103,21 +101,15 @@
 
           <section class="preview-panel">
             <div class="panel-heading">
-              <span>Live View</span>
+              <span>Backend Runtime</span>
               <div class="panel-actions">
-                <small id="modelStatus">Model not loaded</small>
-                <button class="icon-button secondary compact-icon" id="fullscreenPreview" title="Fullscreen live preview" type="button">
-                  <i data-lucide="maximize"></i>
-                </button>
+                <small id="modelStatus">Backend runtime</small>
               </div>
             </div>
-            <div class="video-stage">
-              <video id="cameraFeed" autoplay muted playsinline></video>
-              <canvas id="overlayCanvas"></canvas>
-              <div class="empty-state" id="emptyState">
-                <i data-lucide="camera"></i>
-                <span>Run the workflow to open a camera.</span>
-              </div>
+            <div class="runtime-stage">
+              <i data-lucide="monitor-play"></i>
+              <strong>OpenCV display</strong>
+              <span id="runtimeDetail">Stopped</span>
             </div>
           </section>
 

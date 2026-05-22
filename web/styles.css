@@ -108,7 +108,7 @@ p {
 .button svg,
 .icon-button svg,
 .palette-item svg,
-.empty-state svg {
+.runtime-stage svg {
   width: 18px;
   height: 18px;
   stroke-width: 2.2;
@@ -466,49 +466,34 @@ textarea:focus {
   min-height: 18px;
 }
 
-.video-stage {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  border-radius: 8px;
-  background: #0b1117;
-}
-
-.video-stage:fullscreen {
-  width: 100vw;
-  height: 100vh;
-  aspect-ratio: auto;
-  border-radius: 0;
-  background: #000;
-}
-
-#cameraFeed,
-#overlayCanvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-#overlayCanvas {
-  pointer-events: none;
-}
-
-.empty-state {
-  position: absolute;
-  inset: 0;
+.runtime-stage {
+  min-height: 148px;
   display: grid;
   place-items: center;
   align-content: center;
-  gap: 10px;
-  color: #dbe4eb;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafb;
+  color: var(--ink);
   text-align: center;
   padding: 16px;
 }
 
-.empty-state.hidden {
-  display: none;
+.runtime-stage svg {
+  width: 28px;
+  height: 28px;
+  color: var(--primary);
+}
+
+.runtime-stage strong {
+  font-size: 14px;
+}
+
+.runtime-stage span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 #eventLog {
