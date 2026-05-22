@@ -177,8 +177,12 @@ def active_filter_node(workflow: dict) -> dict | None:
 
 
 def detections_for_node(workflow: dict, node_id: str, detections: list[dict], filtered: list[dict]) -> list[dict]:
-    if not enabled_node(workflow, node_id) or not has_active_path(workflow, "camera", node_id):
+    node = enabled_node(workflow, node_id)
+    if not node or not has_active_path(workflow, "camera", node_id):
         return []
+    if node_id == "preview" and not bool(node.get("config", {}).get("useFilter", False)):
+        if active_detector_node(workflow) and has_active_path(workflow, "detector", node_id):
+            return detections
     if active_filter_node(workflow) and has_active_path(workflow, "filter", node_id):
         return filtered
     if active_detector_node(workflow) and has_active_path(workflow, "detector", node_id):

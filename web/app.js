@@ -55,6 +55,7 @@ const NODE_BLUEPRINTS = {
     config: {
       showBoxes: true,
       showLabels: true,
+      useFilter: false,
     },
   },
   alert: {
@@ -465,6 +466,9 @@ function renderInspector() {
     }));
     els.nodeForm.appendChild(makeToggleField("showLabels", "Show labels", node.config.showLabels, (checked) => {
       node.config.showLabels = checked;
+    }));
+    els.nodeForm.appendChild(makeToggleField("useFilter", "Use class filter", node.config.useFilter ?? false, (checked) => {
+      node.config.useFilter = checked;
     }));
   }
 
