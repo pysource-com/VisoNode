@@ -18,12 +18,16 @@ const NODE_BLUEPRINTS = {
   },
   detector: {
     title: "Object Detection",
-    subtitle: "COCO-SSD model in browser",
+    subtitle: "YOLO26 or browser COCO-SSD",
     x: 332,
     y: 72,
     config: {
+      engine: "yolo26",
       threshold: 0.55,
       intervalMs: 450,
+      yoloModel: "yolo26n.pt",
+      imgsz: 640,
+      end2end: true,
       modelBase: "lite_mobilenet_v2",
     },
   },
@@ -82,6 +86,7 @@ const state = {
   model: null,
   running: false,
   modelLoading: false,
+  captureCanvas: document.createElement("canvas"),
   cameraDevices: [],
   detections: [],
   filteredDetections: [],
@@ -138,6 +143,8 @@ function cacheElements() {
   els.modelStatus = document.getElementById("modelStatus");
   els.cameraFeed = document.getElementById("cameraFeed");
   els.overlayCanvas = document.getElementById("overlayCanvas");
+  els.videoStage = document.querySelector(".video-stage");
+  els.fullscreenPreview = document.getElementById("fullscreenPreview");
   els.emptyState = document.getElementById("emptyState");
   els.eventLog = document.getElementById("eventLog");
   els.fpsValue = document.getElementById("fpsValue");
@@ -150,6 +157,8 @@ function bindEvents() {
   document.getElementById("saveWorkflow").addEventListener("click", saveWorkflow);
   document.getElementById("exportWorkflow").addEventListener("click", exportWorkflow);
   document.getElementById("resetWorkflow").addEventListener("click", resetWorkflow);
+  els.fullscreenPreview.addEventListener("click", togglePreviewFullscreen);
+  document.addEventListener("fullscreenchange", updateFullscreenButton);
 
   document.querySelectorAll(".palette-item").forEach((button) => {
     button.draggable = true;
@@ -369,21 +378,50 @@ function renderInspector() {
   }
 
   if (node.type === "detector") {
+    const engine = detectorEngine(node);
+    els.nodeForm.appendChild(makeSelectField("engine", "Engine", engine, [
+      ["yolo26", "Ultralytics YOLO26"],
+      ["cocoSsd", "Browser COCO-SSD"],
+    ], (value) => {
+      node.config.engine = value;
+      state.model = null;
+      els.modelStatus.textContent = value === "yolo26" ? "YOLO26 backend selected" : "Model changed";
+      renderInspector();
+    }));
     els.nodeForm.appendChild(makeRangeField("threshold", "Confidence", node.config.threshold, 0.1, 0.95, 0.05, (value) => {
       node.config.threshold = value;
     }));
     els.nodeForm.appendChild(makeNumberField("intervalMs", "Inference interval ms", node.config.intervalMs, 150, 2000, (value) => {
       node.config.intervalMs = value;
     }));
-    els.nodeForm.appendChild(makeSelectField("modelBase", "Model", node.config.modelBase, [
-      ["lite_mobilenet_v2", "Fast mobile model"],
-      ["mobilenet_v1", "Balanced model"],
-      ["mobilenet_v2", "More accurate model"],
-    ], (value) => {
-      node.config.modelBase = value;
-      state.model = null;
-      els.modelStatus.textContent = "Model changed";
-    }));
+    if (engine === "yolo26") {
+      els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 model", node.config.yoloModel || "yolo26n.pt", [
+        ["yolo26n.pt", "YOLO26 nano"],
+        ["yolo26s.pt", "YOLO26 small"],
+        ["yolo26m.pt", "YOLO26 medium"],
+        ["yolo26l.pt", "YOLO26 large"],
+        ["yolo26x.pt", "YOLO26 extra large"],
+      ], (value) => {
+        node.config.yoloModel = value;
+        els.modelStatus.textContent = "YOLO26 model changed";
+      }));
+      els.nodeForm.appendChild(makeNumberField("imgsz", "Image size", node.config.imgsz || 640, 320, 1280, (value) => {
+        node.config.imgsz = value;
+      }));
+      els.nodeForm.appendChild(makeToggleField("end2end", "End-to-end head", node.config.end2end ?? true, (checked) => {
+        node.config.end2end = checked;
+      }));
+    } else {
+      els.nodeForm.appendChild(makeSelectField("modelBase", "Model", node.config.modelBase || "lite_mobilenet_v2", [
+        ["lite_mobilenet_v2", "Fast mobile model"],
+        ["mobilenet_v1", "Balanced model"],
+        ["mobilenet_v2", "More accurate model"],
+      ], (value) => {
+        node.config.modelBase = value;
+        state.model = null;
+        els.modelStatus.textContent = "Model changed";
+      }));
+    }
   }
 
   if (node.type === "filter") {
@@ -552,6 +590,11 @@ async function loadDetectionModel() {
   if (!detector) {
     return;
   }
+  if (detectorEngine(detector) === "yolo26") {
+    state.model = null;
+    els.modelStatus.textContent = `${detector.config.yoloModel || "yolo26n.pt"} backend ready`;
+    return;
+  }
   if (state.model || state.modelLoading) return;
   if (!window.cocoSsd) {
     throw new Error("COCO-SSD library did not load. Check the internet connection for CDN assets.");
@@ -609,10 +652,22 @@ async function processFrame(timestamp) {
     return;
   }
 
-  const shouldInfer = state.model && timestamp - state.lastInferenceAt >= Number(detector.config.intervalMs);
+  const shouldInfer = (detectorEngine(detector) === "yolo26" || state.model) && timestamp - state.lastInferenceAt >= Number(detector.config.intervalMs);
   if (shouldInfer) {
     state.lastInferenceAt = timestamp;
-    const predictions = await state.model.detect(els.cameraFeed);
+    let predictions = [];
+    try {
+      predictions = detectorEngine(detector) === "yolo26"
+        ? await detectWithYolo26(detector)
+        : await state.model.detect(els.cameraFeed);
+    } catch (error) {
+      console.error(error);
+      state.running = false;
+      setStatus("Error");
+      updateNodeStatuses("error");
+      logEvent("Detection failed", error.message || "Unable to run object detection.");
+      return;
+    }
     state.detections = predictions.filter((item) => item.score >= Number(detector.config.threshold));
     state.filteredDetections = filterDetections(state.detections);
     els.objectCount.textContent = String(detectionsForNode("preview").length || detectionsForNode("alert").length);
@@ -620,6 +675,36 @@ async function processFrame(timestamp) {
     maybeAlert();
   }
   requestAnimationFrame(processFrame);
+}
+
+async function detectWithYolo26(detector) {
+  els.modelStatus.textContent = `Running ${detector.config.yoloModel || "yolo26n.pt"}`;
+  const response = await fetch("/api/detect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      image: captureFrameDataUrl(),
+      model: detector.config.yoloModel || "yolo26n.pt",
+      threshold: Number(detector.config.threshold),
+      imgsz: Number(detector.config.imgsz) || 640,
+      end2end: detector.config.end2end ?? true,
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "YOLO26 request failed.");
+  }
+  els.modelStatus.textContent = `${payload.model} ready`;
+  return payload.detections || [];
+}
+
+function captureFrameDataUrl() {
+  const canvas = state.captureCanvas;
+  canvas.width = els.cameraFeed.videoWidth;
+  canvas.height = els.cameraFeed.videoHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(els.cameraFeed, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.82);
 }
 
 function filterDetections(detections) {
@@ -825,6 +910,10 @@ function activeDetectorNode() {
   return detector?.enabled && hasActivePath("camera", "detector") ? detector : null;
 }
 
+function detectorEngine(detector) {
+  return detector?.config.engine || "yolo26";
+}
+
 function activeFilterNode() {
   const filter = getNode("filter");
   return filter?.enabled && activeDetectorNode() && hasActivePath("detector", "filter") ? filter : null;
@@ -866,6 +955,23 @@ function hasActivePath(fromId, toId) {
 
 function setStatus(status) {
   els.workflowStatus.textContent = status;
+}
+
+function togglePreviewFullscreen() {
+  if (!document.fullscreenElement) {
+    els.videoStage.requestFullscreen?.();
+    return;
+  }
+  document.exitFullscreen?.();
+}
+
+function updateFullscreenButton() {
+  const isFullscreen = document.fullscreenElement === els.videoStage;
+  els.fullscreenPreview.title = isFullscreen ? "Exit fullscreen live preview" : "Fullscreen live preview";
+  els.fullscreenPreview.innerHTML = `<i data-lucide="${isFullscreen ? "minimize" : "maximize"}"></i>`;
+  if (window.lucide) {
+    window.lucide.createIcons();
+  }
 }
 
 function updateNodeStatuses(status = null) {

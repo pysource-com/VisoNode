@@ -4,9 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="01b32564-2e7d-419f-956e-bde8ddd43dd5" name="Changes" comment="First version, simple webapp workflow with coco ssd">
+    <list default="true" id="01b32564-2e7d-419f-956e-bde8ddd43dd5" name="Changes" comment="Fix bug nodes not working">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/web/app.js" beforeDir="false" afterPath="$PROJECT_DIR$/web/app.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/web/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/web/index.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/web/styles.css" beforeDir="false" afterPath="$PROJECT_DIR$/web/styles.css" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -103,7 +106,15 @@
       <option name="project" value="LOCAL" />
       <updated>1779364461651</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="Fix bug nodes not working">
+      <option name="closed" value="true" />
+      <created>1779366157907</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1779366157907</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -112,14 +123,15 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Added ignore" />
     <MESSAGE value="First version, simple webapp workflow with coco ssd" />
-    <option name="LAST_COMMIT_MESSAGE" value="First version, simple webapp workflow with coco ssd" />
+    <MESSAGE value="Fix bug nodes not working" />
+    <option name="LAST_COMMIT_MESSAGE" value="Fix bug nodes not working" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/main.py</url>
-          <line>19</line>
+          <line>135</line>
           <option name="timeStamp" value="1" />
         </line-breakpoint>
       </breakpoints>

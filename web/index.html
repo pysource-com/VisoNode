@@ -104,7 +104,12 @@
           <section class="preview-panel">
             <div class="panel-heading">
               <span>Live View</span>
-              <small id="modelStatus">Model not loaded</small>
+              <div class="panel-actions">
+                <small id="modelStatus">Model not loaded</small>
+                <button class="icon-button secondary compact-icon" id="fullscreenPreview" title="Fullscreen live preview" type="button">
+                  <i data-lucide="maximize"></i>
+                </button>
+              </div>
             </div>
             <div class="video-stage">
               <video id="cameraFeed" autoplay muted playsinline></video>
