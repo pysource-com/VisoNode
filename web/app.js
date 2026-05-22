@@ -1,7 +1,15 @@
-const NODE_WIDTH = 190;
-const NODE_HEIGHT = 108;
-const NODE_PORT_Y = 54;
+const NODE_WIDTH = 210;
+const NODE_HEIGHT = 88;
+const NODE_PORT_Y = 44;
 const CANVAS_PADDING = 16;
+
+const NODE_ICONS = {
+  camera: "video",
+  detector: "scan-search",
+  filter: "filter",
+  preview: "monitor-play",
+  alert: "bell-ring",
+};
 
 const NODE_BLUEPRINTS = {
   camera: {
@@ -241,27 +249,30 @@ function renderWorkflow() {
     element.className = `workflow-node ${node.id === state.selectedNodeId ? "selected" : ""}`;
     element.style.transform = `translate(${node.x}px, ${node.y}px)`;
     element.dataset.nodeId = node.id;
+    element.dataset.type = node.type;
+    const statusKey = node.enabled ? node.status : "off";
+    const statusLabel = node.enabled ? node.status : "off";
+    const toggleIcon = node.enabled ? "pause" : "play";
+    const toggleTitle = node.enabled ? "Disable node" : "Enable node";
     element.innerHTML = `
       <span class="node-port in" data-port="in" title="Connect input"></span>
-      <div class="node-title-row">
-        <span class="node-title">${escapeHtml(node.title)}</span>
-        <span class="status-pill ${node.enabled ? "" : "paused"}">${node.enabled ? node.status : "off"}</span>
+      <div class="node-toolbar">
+        <button class="mini-button" data-action="toggle" title="${toggleTitle}"><i data-lucide="${toggleIcon}"></i></button>
+        <button class="mini-button danger" data-action="remove" title="Remove node"><i data-lucide="trash-2"></i></button>
       </div>
-      <div class="node-subtitle">${escapeHtml(node.subtitle)}</div>
-      <div class="node-actions">
-        <button class="mini-button" data-action="select">Config</button>
-        <button class="mini-button" data-action="toggle">${node.enabled ? "Disable" : "Enable"}</button>
-        <button class="mini-button danger" data-action="remove" title="Remove node">Remove</button>
+      <div class="node-icon"><i data-lucide="${NODE_ICONS[node.type] || "box"}"></i></div>
+      <div class="node-body">
+        <div class="node-title-row">
+          <span class="node-title">${escapeHtml(node.title)}</span>
+          <span class="status-pill" data-status="${escapeHtml(statusKey)}">${escapeHtml(statusLabel)}</span>
+        </div>
+        <div class="node-subtitle">${escapeHtml(node.subtitle)}</div>
       </div>
       <span class="node-port out" data-port="out" title="Drag to connect"></span>
     `;
     element.addEventListener("pointerdown", (event) => startDrag(event, node.id));
     element.querySelector('[data-port="out"]').addEventListener("pointerdown", (event) => {
       startConnection(event, node.id);
-    });
-    element.querySelector('[data-action="select"]').addEventListener("click", (event) => {
-      event.stopPropagation();
-      selectNode(node.id);
     });
     element.querySelector('[data-action="toggle"]').addEventListener("click", (event) => {
       event.stopPropagation();
@@ -274,6 +285,7 @@ function renderWorkflow() {
     element.addEventListener("click", () => selectNode(node.id));
     els.nodeLayer.appendChild(element);
   }
+  if (window.lucide) window.lucide.createIcons();
 }
 
 function renderEdges() {
@@ -303,8 +315,8 @@ function renderEdges() {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
     path.setAttribute("fill", "none");
-    path.setAttribute("stroke", "#126b63");
-    path.setAttribute("stroke-width", "3");
+    path.setAttribute("stroke", "#5b6275");
+    path.setAttribute("stroke-width", "2.5");
     path.setAttribute("stroke-linecap", "round");
     path.classList.add("edge-path");
     els.edgeLayer.appendChild(path);
@@ -319,8 +331,8 @@ function renderEdges() {
       state.connecting.currentY
     ));
     path.setAttribute("fill", "none");
-    path.setAttribute("stroke", "#b9432f");
-    path.setAttribute("stroke-width", "3");
+    path.setAttribute("stroke", "#ff6d5a");
+    path.setAttribute("stroke-width", "2.5");
     path.setAttribute("stroke-linecap", "round");
     path.setAttribute("stroke-dasharray", "6 6");
     path.classList.add("edge-path", "preview");
