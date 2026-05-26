@@ -112,13 +112,110 @@ def open_external_terminal() -> str:
     raise RuntimeError("No supported external terminal application was found.")
 
 
-def load_yolo_model(model_name: str):
+def runtime_devices() -> dict:
+    payload = {
+        "torchInstalled": False,
+        "torchVersion": None,
+        "cudaAvailable": False,
+        "cudaVersion": None,
+        "nvidiaSmi": bool(shutil.which("nvidia-smi")),
+        "nvidiaGpus": [],
+        "devices": [],
+        "recommendation": "Use CPU, or run scripts\\install-gpu.ps1 on a machine with an NVIDIA GPU.",
+    }
+
+    nvidia_smi = shutil.which("nvidia-smi")
+    if nvidia_smi:
+        try:
+            result = subprocess.run(
+                [
+                    nvidia_smi,
+                    "--query-gpu=name,memory.total,driver_version",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    parts = [part.strip() for part in line.split(",")]
+                    if len(parts) >= 3:
+                        payload["nvidiaGpus"].append({
+                            "name": parts[0],
+                            "memoryMb": int(float(parts[1])),
+                            "driver": parts[2],
+                        })
+        except Exception:
+            pass
+
+    try:
+        import torch
+    except ImportError:
+        return payload
+
+    payload["torchInstalled"] = True
+    payload["torchVersion"] = torch.__version__
+    payload["cudaVersion"] = torch.version.cuda
+    payload["cudaAvailable"] = bool(torch.cuda.is_available())
+    if payload["cudaAvailable"]:
+        for index in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(index)
+            payload["devices"].append({
+                "id": f"cuda:{index}",
+                "index": index,
+                "name": torch.cuda.get_device_name(index),
+                "memoryMb": round(props.total_memory / (1024 * 1024)),
+            })
+        payload["recommendation"] = "CUDA is available. Select Auto or a CUDA device in Object Detection."
+    elif payload["nvidiaGpus"]:
+        payload["recommendation"] = "NVIDIA GPU detected, but PyTorch CUDA is unavailable. Run scripts\\install-gpu.ps1."
+    return payload
+
+
+def resolve_inference_device(config: dict) -> tuple[str, str]:
+    requested = str(config.get("device", "auto") or "auto").strip().lower()
+    if requested in ("", "auto"):
+        try:
+            import torch
+        except ImportError:
+            return "cpu", "CPU"
+        if torch.cuda.is_available():
+            return "cuda:0", f"CUDA 0 - {torch.cuda.get_device_name(0)}"
+        return "cpu", "CPU"
+
+    if requested == "cpu":
+        return "cpu", "CPU"
+
+    if requested.isdigit():
+        requested = f"cuda:{requested}"
+    if requested.startswith("cuda"):
+        try:
+            import torch
+        except ImportError as exc:
+            raise RuntimeError("GPU was selected, but PyTorch is not installed. Run scripts\\install-gpu.ps1.") from exc
+        if not torch.cuda.is_available():
+            raise RuntimeError("GPU was selected, but PyTorch CUDA is not available. Run scripts\\check-gpu.ps1.")
+        try:
+            index = int(requested.split(":", 1)[1]) if ":" in requested else 0
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid CUDA device '{requested}'.") from exc
+        if index < 0 or index >= torch.cuda.device_count():
+            raise RuntimeError(f"CUDA device {index} is not available.")
+        return f"cuda:{index}", f"CUDA {index} - {torch.cuda.get_device_name(index)}"
+
+    raise RuntimeError(f"Unsupported inference device '{requested}'.")
+
+
+def load_yolo_model(model_name: str, device: str = "cpu"):
     if model_name not in YOLO26_MODEL_SET:
         raise ValueError(f"Unsupported YOLO26 model '{model_name}'.")
 
+    cache_key = (model_name, device)
     with _model_lock:
-        if model_name in _model_cache:
-            return _model_cache[model_name]
+        if cache_key in _model_cache:
+            return _model_cache[cache_key]
         try:
             from ultralytics import YOLO
         except ImportError as exc:
@@ -127,7 +224,8 @@ def load_yolo_model(model_name: str):
             ) from exc
 
         model = YOLO(model_name)
-        _model_cache[model_name] = model
+        model.to(device)
+        _model_cache[cache_key] = model
         return model
 
 
@@ -204,10 +302,12 @@ def detect_yolo26_frame(frame, detector: dict) -> list[dict]:
     model_name = config.get("yoloModel") or "yolo26n.pt"
     threshold = float(config.get("threshold", 0.55))
     imgsz = int(config.get("imgsz", 640))
-    model = load_yolo_model(model_name)
+    device, _ = resolve_inference_device(config)
+    model = load_yolo_model(model_name, device)
     predict_args = {
         "conf": threshold,
         "imgsz": imgsz,
+        "device": device,
         "verbose": False,
     }
     if "end2end" in config:
@@ -285,6 +385,7 @@ class WorkflowRunner:
             "fps": 0,
             "objectCount": 0,
             "model": None,
+            "device": "CPU",
             "error": None,
             "events": [],
         }
@@ -302,6 +403,7 @@ class WorkflowRunner:
                 "fps": 0,
                 "objectCount": 0,
                 "model": None,
+                "device": "CPU",
                 "error": None,
                 "events": [],
             })
@@ -366,9 +468,11 @@ class WorkflowRunner:
                 if engine != "yolo26":
                     raise RuntimeError("Backend runtime supports Ultralytics YOLO26 only.")
                 model_name = detector.get("config", {}).get("yoloModel") or "yolo26n.pt"
+                device, device_label = resolve_inference_device(detector.get("config", {}))
                 self._add_terminal(f"Loading detector model {model_name}")
-                load_yolo_model(model_name)
-                self._set_status(state="running", model=model_name)
+                self._add_terminal(f"Using inference device {device_label}")
+                load_yolo_model(model_name, device)
+                self._set_status(state="running", model=model_name, device=device_label)
                 self._add_terminal(f"Loaded detector model {model_name}")
             else:
                 self._set_status(state="running")
@@ -484,6 +588,9 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/workflow/status":
             json_response(self, 200, runner.status())
+            return
+        if path == "/api/runtime/devices":
+            json_response(self, 200, runtime_devices())
             return
         if path == "/api/terminal/logs":
             cursor_raw = parse_qs(parsed.query).get("since", ["0"])[0]

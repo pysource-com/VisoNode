@@ -12,10 +12,28 @@ The app runs locally. The browser is only the workflow editor: it sends the grap
 
 ## Run
 
-Install Python dependencies first:
+Install Python dependencies first. The default install uses the normal Python packages and runs on CPU:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+For NVIDIA GPU acceleration, install the CUDA-enabled PyTorch build before running the app:
+
+```powershell
+.\scripts\install-gpu.ps1
+```
+
+The GPU installer uses PyTorch's CUDA wheel index, installs the app requirements, and runs a CUDA smoke test. By default it installs the `cu128` wheel set. To target another supported PyTorch CUDA wheel set:
+
+```powershell
+.\scripts\install-gpu.ps1 -CudaWheel cu126
+```
+
+To diagnose an existing install:
+
+```powershell
+.\scripts\check-gpu.ps1
 ```
 
 ```powershell
@@ -30,10 +48,16 @@ http://127.0.0.1:8000
 
 Open the editor, configure the graph, then click **Run**. Python opens the configured OpenCV camera source, processes frames according to the active node connections, and displays the output in a native OpenCV window. Press **Stop**, `q`, or `Esc` to stop the runtime. The first YOLO26 run downloads the selected Ultralytics weights, such as `yolo26n.pt`.
 
+The Object Detection node includes a **Device** setting:
+
+- Auto: uses CUDA when PyTorch can see an NVIDIA GPU, otherwise CPU.
+- CPU: always runs inference on CPU.
+- CUDA devices: require a working CUDA-enabled PyTorch install and fail loudly if CUDA is unavailable.
+
 ## Current nodes
 
 - Camera Loader: chooses the OpenCV source, resolution, and capture settings.
-- Object Detection: selects Ultralytics YOLO26 model, confidence threshold, and inference interval.
+- Object Detection: selects Ultralytics YOLO26 model, confidence threshold, inference interval, and CPU/GPU device.
 - Class Filter: passes only configured classes such as `person, car, dog`.
 - OpenCV Preview: draws bounding boxes and labels in a native OpenCV window.
 - Alert Output: writes backend detection events with a cooldown.

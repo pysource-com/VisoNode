@@ -33,6 +33,7 @@ const NODE_BLUEPRINTS = {
       threshold: 0.55,
       intervalMs: 450,
       yoloModel: "yolo26n.pt",
+      device: "auto",
       imgsz: 640,
       end2end: true,
     },
@@ -97,6 +98,12 @@ const state = {
   terminalPollTimer: null,
   terminalAutoScroll: true,
   contextMenuNodeId: null,
+  runtimeDevices: {
+    nvidiaGpus: [],
+    cudaAvailable: false,
+    devices: [],
+    recommendation: "",
+  },
 };
 
 const els = {};
@@ -108,6 +115,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderInspector();
   renderEdges();
   pollBackendStatus();
+  fetchRuntimeDevices();
   startTerminalPolling();
   logEvent("Workflow ready", "The browser edits graph connections; Python runs the camera pipeline.");
   if (window.lucide) {
@@ -160,6 +168,7 @@ function cacheElements() {
   els.eventLog = document.getElementById("eventLog");
   els.fpsValue = document.getElementById("fpsValue");
   els.objectCount = document.getElementById("objectCount");
+  els.deviceValue = document.getElementById("deviceValue");
   els.terminalPanel = document.getElementById("terminalPanel");
   els.terminalHeader = document.getElementById("terminalHeader");
   els.terminalBody = document.getElementById("terminalBody");
@@ -443,6 +452,9 @@ function renderInspector() {
     ], (value) => {
       node.config.yoloModel = value;
     }));
+    els.nodeForm.appendChild(makeSelectField("device", "Device", node.config.device || "auto", runtimeDeviceOptions(), (value) => {
+      node.config.device = value;
+    }));
     els.nodeForm.appendChild(makeNumberField("imgsz", "Image size", node.config.imgsz || 640, 320, 1280, (value) => {
       node.config.imgsz = value;
     }));
@@ -486,16 +498,33 @@ function makeSelectField(name, label, value, options, onChange) {
   const wrapper = makeLabel(label);
   const select = document.createElement("select");
   select.name = name;
-  for (const [optionValue, optionLabel] of options) {
+  for (const optionItem of options) {
+    const [optionValue, optionLabel, disabled = false] = optionItem;
     const option = document.createElement("option");
     option.value = optionValue;
     option.textContent = optionLabel;
     option.selected = optionValue === value;
+    option.disabled = disabled;
     select.appendChild(option);
   }
   select.addEventListener("change", () => onChange(select.value));
   wrapper.appendChild(select);
   return wrapper;
+}
+
+function runtimeDeviceOptions() {
+  const options = [
+    ["auto", "Auto"],
+    ["cpu", "CPU"],
+  ];
+  for (const device of state.runtimeDevices.devices || []) {
+    const memoryGb = device.memoryMb ? ` ${Math.round(device.memoryMb / 1024)}GB` : "";
+    options.push([device.id, `${device.id.toUpperCase()} ${device.name}${memoryGb}`]);
+  }
+  if (!state.runtimeDevices.devices?.length && state.runtimeDevices.nvidiaGpus?.length) {
+    options.push(["cuda-unavailable", "CUDA unavailable - run install-gpu.ps1", true]);
+  }
+  return options;
 }
 
 function makeTextField(name, label, value, onChange) {
@@ -627,11 +656,23 @@ async function pollBackendStatus() {
   }
 }
 
+async function fetchRuntimeDevices() {
+  try {
+    const response = await fetch("/api/runtime/devices", { cache: "no-store" });
+    if (!response.ok) return;
+    state.runtimeDevices = await response.json();
+    if (selectedNode()?.type === "detector") renderInspector();
+  } catch (error) {
+    console.warn(error);
+  }
+}
+
 function renderBackendStatus(payload) {
   state.running = Boolean(payload.running);
   setStatus(titleCase(payload.state || "idle"));
   els.fpsValue.textContent = String(payload.fps || 0);
   els.objectCount.textContent = String(payload.objectCount || 0);
+  els.deviceValue.textContent = payload.device || "CPU";
   updateNodeStatuses(payload.state === "error" ? "error" : state.running ? "running" : "idle");
   if (Array.isArray(payload.events) && payload.events.length) {
     renderEvents(payload.events);
