@@ -2,9 +2,10 @@ const NODE_WIDTH = 210;
 const NODE_HEIGHT = 88;
 const NODE_PORT_Y = 44;
 const CANVAS_PADDING = 16;
+const INPUT_NODE_ID = "input";
 
 const NODE_ICONS = {
-  camera: "video",
+  input: "file-input",
   detector: "scan-search",
   filter: "filter",
   preview: "monitor-play",
@@ -12,15 +13,18 @@ const NODE_ICONS = {
 };
 
 const NODE_BLUEPRINTS = {
-  camera: {
-    title: "Camera Loader",
-    subtitle: "Python OpenCV capture",
+  input: {
+    title: "Input",
+    subtitle: "Camera or file source",
     x: 44,
     y: 72,
     config: {
+      sourceType: "camera",
       source: 0,
       width: 1280,
       height: 720,
+      filePath: "",
+      loop: true,
     },
   },
   detector: {
@@ -73,14 +77,14 @@ const NODE_BLUEPRINTS = {
 
 const DEFAULT_WORKFLOW = {
   nodes: [
-    makeNode("camera"),
+    makeNode("input"),
     makeNode("detector"),
     makeNode("filter"),
     makeNode("preview"),
     makeNode("alert"),
   ],
   edges: [
-    ["camera", "detector"],
+    [INPUT_NODE_ID, "detector"],
     ["detector", "filter"],
     ["filter", "preview"],
     ["filter", "alert"],
@@ -89,7 +93,7 @@ const DEFAULT_WORKFLOW = {
 
 const state = {
   workflow: normalizeWorkflow(loadWorkflow()),
-  selectedNodeId: "camera",
+  selectedNodeId: INPUT_NODE_ID,
   running: false,
   statusPollTimer: null,
   dragging: null,
@@ -117,7 +121,7 @@ document.addEventListener("DOMContentLoaded", () => {
   pollBackendStatus();
   fetchRuntimeDevices();
   startTerminalPolling();
-  logEvent("Workflow ready", "The browser edits graph connections; Python runs the camera pipeline.");
+  logEvent("Workflow ready", "The browser edits graph connections; Python runs the selected input pipeline.");
   if (window.lucide) {
     window.lucide.createIcons();
   }
@@ -143,19 +147,42 @@ function makeNode(type, overrides = {}) {
 
 function normalizeWorkflow(workflow) {
   for (const node of workflow.nodes || []) {
+    if (node.type === "camera") {
+      node.type = "input";
+      if (node.id === "camera") node.id = INPUT_NODE_ID;
+    }
+  }
+  for (const edge of workflow.edges || []) {
+    if (edge[0] === "camera") edge[0] = INPUT_NODE_ID;
+    if (edge[1] === "camera") edge[1] = INPUT_NODE_ID;
+  }
+
+  for (const node of workflow.nodes || []) {
     const blueprint = NODE_BLUEPRINTS[node.type];
     if (!blueprint) continue;
     node.title = node.customTitle || blueprint.title;
-    node.subtitle = blueprint.subtitle;
     node.config = { ...blueprint.config, ...(node.config || {}) };
-    if (node.type === "camera" && node.config.source === undefined) {
+    if (node.type === "input") {
+      node.subtitle = inputSubtitle(node);
+      node.config.sourceType = node.config.sourceType || "camera";
+    }
+    if (node.type === "input" && node.config.source === undefined) {
       node.config.source = /^\d+$/.test(String(node.config.deviceId || "")) ? Number(node.config.deviceId) : 0;
+    }
+    if (node.type !== "input") {
+      node.subtitle = blueprint.subtitle;
     }
     if (node.type === "detector") {
       node.config.engine = "yolo26";
     }
   }
   return workflow;
+}
+
+function inputSubtitle(node) {
+  const sourceType = node?.config?.sourceType || "camera";
+  if (sourceType === "file") return "OpenCV file source";
+  return "OpenCV camera capture";
 }
 
 function cacheElements() {
@@ -298,7 +325,7 @@ function exportWorkflow() {
 
 function resetWorkflow() {
   state.workflow = structuredClone(DEFAULT_WORKFLOW);
-  state.selectedNodeId = "camera";
+  state.selectedNodeId = INPUT_NODE_ID;
   saveWorkflow();
   updateNodeStatuses();
   renderInspector();
@@ -423,16 +450,35 @@ function renderInspector() {
     updateNodeStatuses();
   }));
 
-  if (node.type === "camera") {
-    els.nodeForm.appendChild(makeTextField("source", "OpenCV source", node.config.source, (value) => {
-      node.config.source = /^\d+$/.test(value) ? Number(value) : value;
+  if (node.type === "input") {
+    els.nodeForm.appendChild(makeSelectField("sourceType", "Input type", node.config.sourceType || "camera", [
+      ["camera", "Camera"],
+      ["file", "File"],
+    ], (value) => {
+      node.config.sourceType = value;
+      node.subtitle = inputSubtitle(node);
+      renderWorkflow();
+      renderInspector();
     }));
-    els.nodeForm.appendChild(makeNumberField("width", "Width", node.config.width, 320, 3840, (value) => {
-      node.config.width = value;
-    }));
-    els.nodeForm.appendChild(makeNumberField("height", "Height", node.config.height, 240, 2160, (value) => {
-      node.config.height = value;
-    }));
+
+    if ((node.config.sourceType || "camera") === "file") {
+      els.nodeForm.appendChild(makeFilePathField("filePath", "File path", node.config.filePath, (value) => {
+        node.config.filePath = value;
+      }));
+      els.nodeForm.appendChild(makeToggleField("loop", "Loop file", node.config.loop ?? true, (checked) => {
+        node.config.loop = checked;
+      }));
+    } else {
+      els.nodeForm.appendChild(makeTextField("source", "OpenCV source", node.config.source, (value) => {
+        node.config.source = /^\d+$/.test(value) ? Number(value) : value;
+      }));
+      els.nodeForm.appendChild(makeNumberField("width", "Width", node.config.width, 320, 3840, (value) => {
+        node.config.width = value;
+      }));
+      els.nodeForm.appendChild(makeNumberField("height", "Height", node.config.height, 240, 2160, (value) => {
+        node.config.height = value;
+      }));
+    }
   }
 
   if (node.type === "detector") {
@@ -492,6 +538,8 @@ function renderInspector() {
       node.config.message = value;
     }));
   }
+
+  if (window.lucide) window.lucide.createIcons();
 }
 
 function makeSelectField(name, label, value, options, onChange) {
@@ -535,6 +583,43 @@ function makeTextField(name, label, value, onChange) {
   input.value = String(value ?? "");
   input.addEventListener("input", () => onChange(input.value));
   wrapper.appendChild(input);
+  return wrapper;
+}
+
+function makeFilePathField(name, label, value, onChange) {
+  const wrapper = makeLabel(label);
+  const row = document.createElement("div");
+  row.className = "file-picker-row";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.name = name;
+  input.value = String(value ?? "");
+  input.placeholder = "Select an image or video file";
+  input.addEventListener("input", () => onChange(input.value));
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "mini-button file-picker-button";
+  button.title = "Browse file";
+  button.innerHTML = '<i data-lucide="folder-open"></i>';
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const payload = await postJson("/api/file-dialog/open", {});
+      if (!payload.path) return;
+      input.value = payload.path;
+      onChange(payload.path);
+      logEvent("File selected", payload.path);
+    } catch (error) {
+      console.error(error);
+      logEvent("Browse failed", error.message || "Unable to open file picker.");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  row.append(input, button);
+  wrapper.appendChild(row);
   return wrapper;
 }
 
@@ -800,8 +885,8 @@ function getNode(id) {
 function isGraphNodeActive(id) {
   const node = getNode(id);
   if (!node?.enabled) return false;
-  if (id === "camera") return true;
-  return hasActivePath("camera", id);
+  if (id === INPUT_NODE_ID) return true;
+  return hasActivePath(INPUT_NODE_ID, id);
 }
 
 function hasActivePath(fromId, toId) {
@@ -833,7 +918,7 @@ function setStatus(status) {
 
 function updateNodeStatuses(status = null) {
   for (const node of state.workflow.nodes) {
-    if (node.id !== "camera" && !isGraphNodeActive(node.id)) {
+    if (node.id !== INPUT_NODE_ID && !isGraphNodeActive(node.id)) {
       node.status = "unlinked";
     } else if (status) {
       node.status = status;

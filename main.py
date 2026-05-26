@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 YOLO26_MODELS = ("yolo26n.pt", "yolo26s.pt", "yolo26m.pt", "yolo26l.pt", "yolo26x.pt")
 YOLO26_MODEL_SET = set(YOLO26_MODELS)
+INPUT_NODE_ID = "input"
+LEGACY_CAMERA_NODE_ID = "camera"
+IMAGE_EXTENSIONS = {".bmp", ".dib", ".jpg", ".jpeg", ".jpe", ".jp2", ".png", ".webp", ".pbm", ".pgm", ".ppm", ".pxm", ".pnm", ".tif", ".tiff"}
 MAX_EVENTS = 32
 MAX_TERMINAL_LINES = 500
 
@@ -110,6 +113,71 @@ def open_external_terminal() -> str:
             subprocess.Popen([path, *args], cwd=str(ROOT), start_new_session=True)
             return f"Opened {executable}"
     raise RuntimeError("No supported external terminal application was found.")
+
+
+def open_file_dialog() -> str | None:
+    if os.name == "nt":
+        powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if not powershell:
+            raise RuntimeError("PowerShell is required to open the Windows file picker.")
+
+        filter_spec = (
+            "Vision files (*.bmp;*.dib;*.jpg;*.jpeg;*.jpe;*.jp2;*.png;*.webp;*.pbm;*.pgm;*.ppm;*.pxm;*.pnm;*.tif;*.tiff;*.mp4;*.avi;*.mov;*.mkv;*.webm;*.m4v;*.wmv)"
+            "|*.bmp;*.dib;*.jpg;*.jpeg;*.jpe;*.jp2;*.png;*.webp;*.pbm;*.pgm;*.ppm;*.pxm;*.pnm;*.tif;*.tiff;*.mp4;*.avi;*.mov;*.mkv;*.webm;*.m4v;*.wmv"
+            "|Image files (*.bmp;*.jpg;*.jpeg;*.png;*.webp;*.tif;*.tiff)|*.bmp;*.jpg;*.jpeg;*.png;*.webp;*.tif;*.tiff"
+            "|Video files (*.mp4;*.avi;*.mov;*.mkv;*.webm;*.m4v;*.wmv)|*.mp4;*.avi;*.mov;*.mkv;*.webm;*.m4v;*.wmv"
+            "|All files (*.*)|*.*"
+        )
+        script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = 'Select input file'
+$dialog.Filter = @'
+{filter_spec}
+'@
+$dialog.Multiselect = $false
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{
+  Write-Output $dialog.FileName
+}}
+"""
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "Windows file picker failed.").strip()
+            raise RuntimeError(detail)
+        selected = result.stdout.strip()
+        return str(Path(selected).resolve()) if selected else None
+
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError as exc:
+        raise RuntimeError("Tkinter is not available in this Python installation.") from exc
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    root.update()
+    try:
+        path = filedialog.askopenfilename(
+            title="Select input file",
+            filetypes=[
+                ("Vision files", "*.bmp *.dib *.jpg *.jpeg *.jpe *.jp2 *.png *.webp *.pbm *.pgm *.ppm *.pxm *.pnm *.tif *.tiff *.mp4 *.avi *.mov *.mkv *.webm *.m4v *.wmv"),
+                ("Image files", "*.bmp *.dib *.jpg *.jpeg *.jpe *.jp2 *.png *.webp *.pbm *.pgm *.ppm *.pxm *.pnm *.tif *.tiff"),
+                ("Video files", "*.mp4 *.avi *.mov *.mkv *.webm *.m4v *.wmv"),
+                ("All files", "*.*"),
+            ],
+        )
+        return str(Path(path).resolve()) if path else None
+    finally:
+        root.destroy()
 
 
 def runtime_devices() -> dict:
@@ -238,6 +306,38 @@ def node_by_id(workflow: dict, node_id: str) -> dict | None:
     return next((node for node in workflow.get("nodes", []) if node.get("id") == node_id), None)
 
 
+def normalize_workflow(workflow: dict) -> dict:
+    for node in workflow.get("nodes", []):
+        if node.get("type") == LEGACY_CAMERA_NODE_ID:
+            node["type"] = INPUT_NODE_ID
+            if node.get("id") == LEGACY_CAMERA_NODE_ID and not node_by_id(workflow, INPUT_NODE_ID):
+                node["id"] = INPUT_NODE_ID
+        if node.get("type") == INPUT_NODE_ID:
+            config = node.setdefault("config", {})
+            config.setdefault("sourceType", "camera")
+            if "source" not in config:
+                config["source"] = config.get("cameraIndex", config.get("deviceId", 0))
+
+    for edge in workflow.get("edges", []):
+        if len(edge) < 2:
+            continue
+        if edge[0] == LEGACY_CAMERA_NODE_ID:
+            edge[0] = INPUT_NODE_ID
+        if edge[1] == LEGACY_CAMERA_NODE_ID:
+            edge[1] = INPUT_NODE_ID
+    return workflow
+
+
+def source_node_id(workflow: dict) -> str:
+    if node_by_id(workflow, INPUT_NODE_ID):
+        return INPUT_NODE_ID
+    return LEGACY_CAMERA_NODE_ID
+
+
+def active_input_node(workflow: dict) -> dict | None:
+    return enabled_node(workflow, source_node_id(workflow))
+
+
 def has_active_path(workflow: dict, from_id: str, to_id: str) -> bool:
     if not enabled_node(workflow, from_id) or not enabled_node(workflow, to_id):
         return False
@@ -262,7 +362,8 @@ def has_active_path(workflow: dict, from_id: str, to_id: str) -> bool:
 
 def active_detector_node(workflow: dict) -> dict | None:
     detector = enabled_node(workflow, "detector")
-    if detector and has_active_path(workflow, "camera", "detector"):
+    input_id = source_node_id(workflow)
+    if detector and has_active_path(workflow, input_id, "detector"):
         return detector
     return None
 
@@ -276,7 +377,8 @@ def active_filter_node(workflow: dict) -> dict | None:
 
 def detections_for_node(workflow: dict, node_id: str, detections: list[dict], filtered: list[dict]) -> list[dict]:
     node = enabled_node(workflow, node_id)
-    if not node or not has_active_path(workflow, "camera", node_id):
+    input_id = source_node_id(workflow)
+    if not node or not has_active_path(workflow, input_id, node_id):
         return []
     if node_id == "preview" and not bool(node.get("config", {}).get("useFilter", False)):
         if active_detector_node(workflow) and has_active_path(workflow, "detector", node_id):
@@ -295,6 +397,90 @@ def normalize_camera_source(value) -> int | str:
         return value
     text = str(value).strip()
     return int(text) if text.isdigit() else text
+
+
+def resolve_file_input_path(value) -> Path:
+    text = str(value or "").strip().strip('"')
+    if not text:
+        raise RuntimeError("File input path is empty.")
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    path = path.resolve()
+    if not path.exists() or not path.is_file():
+        raise RuntimeError(f"File input does not exist: {path}")
+    return path
+
+
+class OpenCVInputSource:
+    def __init__(self, cv2_module, config: dict) -> None:
+        self.cv2 = cv2_module
+        self.config = config
+        self.capture = None
+        self.image = None
+        self.loop = bool(config.get("loop", True))
+        self.label = "input"
+
+    def open(self) -> tuple[str, int, int]:
+        source_type = str(self.config.get("sourceType", "camera") or "camera").lower()
+        if source_type == "file":
+            path = resolve_file_input_path(self.config.get("filePath"))
+            self.label = str(path)
+            if path.suffix.lower() in IMAGE_EXTENSIONS:
+                self.image = self.cv2.imread(str(path))
+                if self.image is None:
+                    raise RuntimeError(f"Unable to read image file: {path}")
+                height, width = self.image.shape[:2]
+                return f"image file {path}", width, height
+            self.capture = self.cv2.VideoCapture(str(path))
+            if not self.capture.isOpened():
+                raise RuntimeError(f"Unable to open video file: {path}")
+            return f"video file {path}", self.width, self.height
+
+        source = normalize_camera_source(
+            self.config.get("source", self.config.get("cameraIndex", self.config.get("deviceId", 0)))
+        )
+        self.label = repr(source)
+        self.capture = self.cv2.VideoCapture(source)
+        self.capture.set(self.cv2.CAP_PROP_BUFFERSIZE, 1)
+        width = int(self.config.get("width", 0) or 0)
+        height = int(self.config.get("height", 0) or 0)
+        if width > 0:
+            self.capture.set(self.cv2.CAP_PROP_FRAME_WIDTH, width)
+        if height > 0:
+            self.capture.set(self.cv2.CAP_PROP_FRAME_HEIGHT, height)
+        if not self.capture.isOpened():
+            raise RuntimeError(f"Unable to open camera source {source!r}.")
+        return f"camera source {source!r}", self.width, self.height
+
+    @property
+    def width(self) -> int:
+        if self.image is not None:
+            return int(self.image.shape[1])
+        return int(self.capture.get(self.cv2.CAP_PROP_FRAME_WIDTH) or 0) if self.capture is not None else 0
+
+    @property
+    def height(self) -> int:
+        if self.image is not None:
+            return int(self.image.shape[0])
+        return int(self.capture.get(self.cv2.CAP_PROP_FRAME_HEIGHT) or 0) if self.capture is not None else 0
+
+    @property
+    def is_static(self) -> bool:
+        return self.image is not None
+
+    def read(self):
+        if self.image is not None:
+            return True, self.image.copy()
+        ok, frame = self.capture.read()
+        if ok or not self.loop:
+            return ok, frame
+        self.capture.set(self.cv2.CAP_PROP_POS_FRAMES, 0)
+        return self.capture.read()
+
+    def release(self) -> None:
+        if self.capture is not None:
+            self.capture.release()
 
 
 def detect_yolo26_frame(frame, detector: dict) -> list[dict]:
@@ -392,8 +578,9 @@ class WorkflowRunner:
 
     def start(self, workflow: dict) -> dict:
         self.stop()
-        if not enabled_node(workflow, "camera"):
-            raise ValueError("Camera Loader node is disabled.")
+        workflow = normalize_workflow(workflow)
+        if not active_input_node(workflow):
+            raise ValueError("Input node is disabled.")
 
         self._stop_event = Event()
         with self._lock:
@@ -434,33 +621,19 @@ class WorkflowRunner:
     def _run(self, workflow: dict) -> None:
         import cv2
 
-        capture = None
+        input_source = None
         window_name = "No-Code AI Vision"
         last_fps_at = time.monotonic()
         frame_count = 0
-        last_inference_at = 0.0
         last_alert_at = 0.0
         last_terminal_detection_at = 0.0
         detections: list[dict] = []
         filtered: list[dict] = []
         try:
-            camera = enabled_node(workflow, "camera")
-            camera_config = camera.get("config", {})
-            source = normalize_camera_source(
-                camera_config.get("source", camera_config.get("cameraIndex", camera_config.get("deviceId", 0)))
-            )
-            capture = cv2.VideoCapture(source)
-            width = int(camera_config.get("width", 0) or 0)
-            height = int(camera_config.get("height", 0) or 0)
-            if width > 0:
-                capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            if height > 0:
-                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            if not capture.isOpened():
-                raise RuntimeError(f"Unable to open camera source {source!r}.")
-            actual_width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-            actual_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
-            self._add_terminal(f"Opened camera source {source!r} ({actual_width}x{actual_height})")
+            input_node = active_input_node(workflow)
+            input_source = OpenCVInputSource(cv2, input_node.get("config", {}))
+            source_label, actual_width, actual_height = input_source.open()
+            self._add_terminal(f"Opened {source_label} ({actual_width}x{actual_height})")
 
             detector = active_detector_node(workflow)
             if detector:
@@ -476,51 +649,60 @@ class WorkflowRunner:
                 self._add_terminal(f"Loaded detector model {model_name}")
             else:
                 self._set_status(state="running")
-                self._add_terminal("No detector node is active; streaming camera frames only")
+                self._add_terminal("No detector node is active; streaming input frames only")
 
-            self._add_event("Workflow running", "Python is capturing, processing, and displaying frames with OpenCV.")
+            self._add_event("Workflow running", "Python is loading, processing, and displaying frames with OpenCV.")
             self._add_terminal("Workflow running")
 
             while not self._stop_event.is_set():
-                ok, frame = capture.read()
+                loop_started_at = time.monotonic()
+                ok, frame = input_source.read()
                 if not ok:
-                    raise RuntimeError("Camera frame could not be read.")
+                    raise RuntimeError("Input frame could not be read.")
 
-                now = time.monotonic()
+                frame_detections = detections if input_source.is_static else []
+                frame_filtered = filtered if input_source.is_static else []
                 detector = active_detector_node(workflow)
+                interval = 0.0
                 if detector:
                     interval = max(0.05, float(detector.get("config", {}).get("intervalMs", 450)) / 1000)
-                    if now - last_inference_at >= interval:
-                        last_inference_at = now
-                        detections = detect_yolo26_frame(frame, detector)
-                        threshold = float(detector.get("config", {}).get("threshold", 0.55))
-                        detections = [item for item in detections if float(item.get("score", 0)) >= threshold]
-                        filtered = filter_detections(workflow, detections)
-                        if detections and now - last_terminal_detection_at >= 1:
-                            last_terminal_detection_at = now
-                            labels = ", ".join(
-                                f"{item.get('class', 'object')}:{float(item.get('score', 0)):.2f}"
-                                for item in detections[:6]
-                            )
-                            if len(detections) > 6:
-                                labels = f"{labels}, +{len(detections) - 6} more"
-                            self._add_terminal(f"Detected {len(detections)} object(s): {labels}")
+                    detections = detect_yolo26_frame(frame, detector)
+                    threshold = float(detector.get("config", {}).get("threshold", 0.55))
+                    detections = [item for item in detections if float(item.get("score", 0)) >= threshold]
+                    filtered = filter_detections(workflow, detections)
+                    frame_detections = detections
+                    frame_filtered = filtered
+
+                    now = time.monotonic()
+                    if detections and now - last_terminal_detection_at >= 1:
+                        last_terminal_detection_at = now
+                        labels = ", ".join(
+                            f"{item.get('class', 'object')}:{float(item.get('score', 0)):.2f}"
+                            for item in detections[:6]
+                        )
+                        if len(detections) > 6:
+                            labels = f"{labels}, +{len(detections) - 6} more"
+                        self._add_terminal(f"Detected {len(detections)} object(s): {labels}")
+                else:
+                    now = time.monotonic()
 
                 preview = enabled_node(workflow, "preview")
                 display_frame = frame.copy()
-                preview_detections = detections_for_node(workflow, "preview", detections, filtered)
-                if preview and has_active_path(workflow, "camera", "preview"):
+                preview_detections = detections_for_node(workflow, "preview", frame_detections, frame_filtered)
+                preview_shown = False
+                if preview and has_active_path(workflow, source_node_id(workflow), "preview"):
                     draw_detections(display_frame, preview_detections, preview)
                     cv2.imshow(window_name, display_frame)
+                    preview_shown = True
                     key = cv2.waitKey(1) & 0xFF
                     if key in (27, ord("q")):
                         self._stop_event.set()
                 else:
                     cv2.waitKey(1)
 
-                alert_detections = detections_for_node(workflow, "alert", detections, filtered)
+                alert_detections = detections_for_node(workflow, "alert", frame_detections, frame_filtered)
                 alert_node = enabled_node(workflow, "alert")
-                if alert_node and alert_detections and has_active_path(workflow, "camera", "alert"):
+                if alert_node and alert_detections and has_active_path(workflow, source_node_id(workflow), "alert"):
                     cooldown = max(0, float(alert_node.get("config", {}).get("cooldownSeconds", 5)))
                     if now - last_alert_at >= cooldown:
                         last_alert_at = now
@@ -542,17 +724,36 @@ class WorkflowRunner:
                     )
                     frame_count = 0
                     last_fps_at = now
+
+                if detector and interval > 0 and not self._stop_event.is_set():
+                    remaining = interval - (time.monotonic() - loop_started_at)
+                    if remaining > 0:
+                        if preview_shown:
+                            deadline = time.monotonic() + remaining
+                            while not self._stop_event.is_set():
+                                remaining_ms = int((deadline - time.monotonic()) * 1000)
+                                if remaining_ms <= 1:
+                                    break
+                                wait_ms = min(50, remaining_ms)
+                                key = cv2.waitKey(wait_ms) & 0xFF
+                                if key in (27, ord("q")):
+                                    self._stop_event.set()
+                                    break
+                                if time.monotonic() >= deadline:
+                                    break
+                        else:
+                            self._stop_event.wait(remaining)
         except Exception as exc:
             self._set_status(running=False, state="error", error=str(exc))
             self._add_event("Workflow error", str(exc))
             self._add_terminal(f"ERROR: {exc}")
         finally:
-            if capture is not None:
-                capture.release()
+            if input_source is not None:
+                input_source.release()
             cv2.destroyAllWindows()
             if self._stop_event.is_set():
                 self._set_status(running=False, state="stopped", fps=0, objectCount=0)
-                self._add_event("Workflow stopped", "Python runtime stopped and released the camera.")
+                self._add_event("Workflow stopped", "Python runtime stopped and released the input source.")
                 self._add_terminal("Workflow stopped")
 
     def _set_status(self, **updates) -> None:
@@ -619,6 +820,12 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
                 message = open_external_terminal()
                 terminal_log(f"{message} in {ROOT}")
                 json_response(self, 200, {"message": message, "cwd": str(ROOT)})
+                return
+            if path == "/api/file-dialog/open":
+                selected_path = open_file_dialog()
+                if selected_path:
+                    terminal_log(f"Selected input file {selected_path}")
+                json_response(self, 200, {"path": selected_path})
                 return
             json_response(self, 404, {"error": "Not found"})
         except Exception as exc:

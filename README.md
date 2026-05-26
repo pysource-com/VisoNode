@@ -1,14 +1,14 @@
 # No-Code AI Vision
 
-A first-pass no-code computer vision workflow builder, similar in spirit to n8n but focused on camera pipelines.
+A first-pass no-code computer vision workflow builder, similar in spirit to n8n but focused on vision input pipelines.
 
 The included sample workflow is:
 
 ```text
-Camera Loader -> Object Detection -> Class Filter -> OpenCV Preview -> Alert Output
+Input -> Object Detection -> Class Filter -> OpenCV Preview -> Alert Output
 ```
 
-The app runs locally. The browser is only the workflow editor: it sends the graph and node settings to Python. Python owns camera capture, YOLO26 inference, filtering, alert generation, and preview display through OpenCV.
+The app runs locally. The browser is only the workflow editor: it sends the graph and node settings to Python. Python owns camera/file loading, YOLO26 inference, filtering, alert generation, and preview display through OpenCV.
 
 ## Run
 
@@ -46,7 +46,7 @@ Open:
 http://127.0.0.1:8000
 ```
 
-Open the editor, configure the graph, then click **Run**. Python opens the configured OpenCV camera source, processes frames according to the active node connections, and displays the output in a native OpenCV window. Press **Stop**, `q`, or `Esc` to stop the runtime. The first YOLO26 run downloads the selected Ultralytics weights, such as `yolo26n.pt`.
+Open the editor, configure the graph, then click **Run**. Python opens the configured input source, processes frames according to the active node connections, and displays the output in a native OpenCV window. Press **Stop**, `q`, or `Esc` to stop the runtime. The first YOLO26 run downloads the selected Ultralytics weights, such as `yolo26n.pt`.
 
 The Object Detection node includes a **Device** setting:
 
@@ -56,7 +56,7 @@ The Object Detection node includes a **Device** setting:
 
 ## Current nodes
 
-- Camera Loader: chooses the OpenCV source, resolution, and capture settings.
+- Input: chooses camera or file mode. Camera mode accepts an OpenCV camera index, stream URL, or capture source plus resolution. File mode accepts a local image or video path and can loop video files.
 - Object Detection: selects Ultralytics YOLO26 model, confidence threshold, inference interval, and CPU/GPU device.
 - Class Filter: passes only configured classes such as `person, car, dog`.
 - OpenCV Preview: draws bounding boxes and labels in a native OpenCV window.
