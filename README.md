@@ -62,6 +62,10 @@ The Object Detection node includes a **Device** setting:
 - OpenCV Preview: draws bounding boxes and labels in a native OpenCV window.
 - Alert Output: writes backend detection events with a cooldown.
 
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0, the same open-source license used by Ultralytics repositories. See [LICENSE](LICENSE).
+
 ## Next useful steps
 
 - Add persisted workflow import.
