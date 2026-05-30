@@ -622,7 +622,7 @@ class WorkflowRunner:
         import cv2
 
         input_source = None
-        window_name = "No-Code AI Vision"
+        window_name = "VisoNode"
         last_fps_at = time.monotonic()
         frame_count = 0
         last_alert_at = 0.0
@@ -838,7 +838,7 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the no-code computer vision workflow builder."
+        description="Run VisoNode, the no-code computer vision workflow builder."
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
@@ -848,7 +848,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     server = ThreadingHTTPServer((args.host, args.port), NoCacheHandler)
-    terminal_log(f"No-code vision builder running at http://{args.host}:{args.port}")
+    terminal_log(f"VisoNode running at http://{args.host}:{args.port}")
     terminal_log("The browser edits the workflow; Python owns capture, inference, and OpenCV display.")
     terminal_log("Press Ctrl+C to stop.")
     try:

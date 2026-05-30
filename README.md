@@ -1,6 +1,8 @@
-# No-Code AI Vision
+# VisoNode
 
-A first-pass no-code computer vision workflow builder, similar in spirit to n8n but focused on vision input pipelines.
+Build computer vision workflows with no code.
+
+VisoNode is a no-code node editor for building computer vision workflows. Connect cameras, models, logic, and outputs in a visual pipeline without writing code.
 
 The included sample workflow is:
 

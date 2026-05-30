@@ -291,7 +291,7 @@ function bindEvents() {
 
 function loadWorkflow() {
   try {
-    const stored = localStorage.getItem("visionWorkflow");
+    const stored = localStorage.getItem("visonodeWorkflow") || localStorage.getItem("visionWorkflow");
     if (stored) {
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) {
@@ -306,7 +306,7 @@ function loadWorkflow() {
 
 function saveWorkflow() {
   normalizeWorkflow(state.workflow);
-  localStorage.setItem("visionWorkflow", JSON.stringify(state.workflow));
+  localStorage.setItem("visonodeWorkflow", JSON.stringify(state.workflow));
   logEvent("Workflow saved", "The graph and node settings were stored in this browser.");
 }
 
@@ -317,10 +317,10 @@ function exportWorkflow() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "vision-workflow.json";
+  link.download = "visonode-workflow.json";
   link.click();
   URL.revokeObjectURL(url);
-  logEvent("Workflow exported", "Downloaded vision-workflow.json.");
+  logEvent("Workflow exported", "Downloaded visonode-workflow.json.");
 }
 
 function resetWorkflow() {
