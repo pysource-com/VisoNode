@@ -1,76 +1,193 @@
-# VisoNode
+<div align="center">
 
-Build computer vision workflows with no code.
+# 🟢 VisoNode
 
-VisoNode is a no-code node editor for building computer vision workflows. Connect cameras, models, logic, and outputs in a visual pipeline without writing code.
+### Build computer vision workflows without writing any code.
 
-The included sample workflow is:
+Connect a camera or video to an AI object-detection model and watch the results live —
+all by dragging and linking boxes in your browser. No machine learning experience required.
 
-```text
-Input -> Object Detection -> Class Filter -> OpenCV Preview -> Alert Output
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
+![Python](https://img.shields.io/badge/python-3.13-blue?logo=python&logoColor=white)
+![Model](https://img.shields.io/badge/model-Ultralytics%20YOLO26-purple)
+![Runs locally](https://img.shields.io/badge/runs-100%25%20local-green)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+
+[**Quick start**](#-quick-start) · [**What it looks like**](#-what-it-looks-like) · [**How it works**](#-how-it-works) · [**The nodes**](#-the-nodes) · [**Roadmap**](#-roadmap)
+
+![The VisoNode workflow editor with all nodes running](docs/workflow-editor.png)
+
+</div>
+
+---
+
+## ⚡ Quick start
+
+```powershell
+# 1. Install dependencies (CPU build — works on any computer)
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# 2. Start the app
+.\.venv\Scripts\python.exe main.py
+
+# 3. Open the editor in your browser
+#    http://127.0.0.1:8000
 ```
 
-The app runs locally. The browser is only the workflow editor: it sends the graph and node settings to Python. Python owns camera/file loading, YOLO26 inference, filtering, alert generation, and preview display through OpenCV.
+Configure the nodes, click **Run**, and the detections appear in a live preview window.
+Press **Stop**, `q`, or `Esc` to stop.
 
-## Run
+> **Have an NVIDIA GPU?** Run `.\scripts\install-gpu.ps1` instead of step 1 for a big speed-up.
+> See [GPU acceleration](#optional--nvidia-gpu-acceleration-much-faster) below.
 
-Install Python dependencies first. The default install uses the normal Python packages and runs on CPU:
+---
+
+## ✨ Highlights
+
+- **No code.** Build the whole pipeline by connecting nodes in the browser.
+- **100% local.** Your camera and video never leave your computer — nothing is sent to the cloud.
+- **State-of-the-art detection.** Powered by Ultralytics **YOLO26**.
+- **CPU or GPU.** Works on any machine; uses your NVIDIA GPU automatically when available.
+- **Live feedback.** See frame rate, object count, and the active device in real time.
+- **Flexible inputs.** Webcams, stream URLs, capture devices, or local image/video files.
+
+A workflow is just a chain of nodes:
+
+```text
+Input  →  Object Detection  →  Class Filter  →  OpenCV Preview  →  Alert Output
+```
+
+Each node does one job: read frames, find objects, keep only the classes you care about,
+draw the results, and log alerts.
+
+---
+
+## 📸 What it looks like
+
+You design the workflow visually. Each node turns green and shows **RUNNING** while the
+pipeline is live. The top bar reports the live frame rate, how many objects were found, and
+which device (CPU or GPU) is doing the work:
+
+![The VisoNode workflow editor with all nodes running](docs/workflow-editor.png)
+
+The detection results appear in a separate window, with boxes and labels drawn over the video:
+
+![Object detection output with bounding boxes over a street scene](docs/detection-output.png)
+
+---
+
+## 🔍 How it works
+
+VisoNode runs entirely on **your own computer**. Nothing is sent to the cloud.
+
+- The **browser** is just the editor. You use it to lay out the nodes and change their settings.
+- **Python** does the real work behind the scenes: opening the camera or file, running the
+  YOLO26 AI model, filtering results, drawing boxes, and logging alerts.
+
+When you click **Run**, the browser hands your workflow to Python, and Python opens a native
+preview window showing the live detections.
+
+---
+
+## 🚀 Getting started
+
+### 1. Install the dependencies
+
+VisoNode comes with a Python virtual environment in the `.venv` folder. Install the required
+packages into it:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-For NVIDIA GPU acceleration, install the CUDA-enabled PyTorch build before running the app:
+This default install runs the AI model on your **CPU**. It works on any computer, but is slower.
+If you don't have an NVIDIA graphics card, this is all you need — skip ahead to step 2.
+
+#### Optional — NVIDIA GPU acceleration (much faster)
+
+If you have an NVIDIA GPU, install the GPU-enabled version instead. This script installs a CUDA
+build of PyTorch, installs the app, and runs a quick test to confirm the GPU is detected:
 
 ```powershell
 .\scripts\install-gpu.ps1
 ```
 
-The GPU installer uses PyTorch's CUDA wheel index, installs the app requirements, and runs a CUDA smoke test. By default it installs the `cu128` wheel set. To target another supported PyTorch CUDA wheel set:
+By default it installs the `cu128` driver wheels. To target a different CUDA version:
 
 ```powershell
 .\scripts\install-gpu.ps1 -CudaWheel cu126
 ```
 
-To diagnose an existing install:
+To check whether an existing install can see your GPU:
 
 ```powershell
 .\scripts\check-gpu.ps1
 ```
 
+### 2. Start the app
+
 ```powershell
 .\.venv\Scripts\python.exe main.py
 ```
 
-Open:
+### 3. Open the editor
+
+Open this address in your browser:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-Open the editor, configure the graph, then click **Run**. Python opens the configured input source, processes frames according to the active node connections, and displays the output in a native OpenCV window. Press **Stop**, `q`, or `Esc` to stop the runtime. The first YOLO26 run downloads the selected Ultralytics weights, such as `yolo26n.pt`.
+### 4. Build and run a workflow
 
-The Object Detection node includes a **Device** setting:
+1. Configure the nodes (for example, point the **Input** node at your camera or a video file).
+2. Click **Run**.
+3. Python opens the input source, processes each frame through the connected nodes, and shows
+   the result in a native **OpenCV** window.
+4. To stop, click **Stop**, or press `q` or `Esc` in the preview window.
 
-- Auto: uses CUDA when PyTorch can see an NVIDIA GPU, otherwise CPU.
-- CPU: always runs inference on CPU.
-- CUDA devices: require a working CUDA-enabled PyTorch install and fail loudly if CUDA is unavailable.
+> **First run note:** the first time you use Object Detection, it automatically downloads the
+> YOLO26 model weights (for example `yolo26n.pt`). This happens once and may take a moment.
 
-## Current nodes
+---
 
-- Input: chooses camera or file mode. Camera mode accepts an OpenCV camera index, stream URL, or capture source plus resolution. File mode accepts a local image or video path and can loop video files.
-- Object Detection: selects Ultralytics YOLO26 model, confidence threshold, inference interval, and CPU/GPU device.
-- Class Filter: passes only configured classes such as `person, car, dog`.
-- OpenCV Preview: draws bounding boxes and labels in a native OpenCV window.
-- Alert Output: writes backend detection events with a cooldown.
+## 🧩 The nodes
 
-## License
+| Node | What it does |
+| --- | --- |
+| **Input** | Chooses where frames come from. *Camera mode* takes an OpenCV camera index, a stream URL, or a capture source plus resolution. *File mode* takes a local image or video path and can loop videos. |
+| **Object Detection** | Runs an Ultralytics **YOLO26** model. Lets you pick the model size, confidence threshold, how often to run inference, and the CPU/GPU device. |
+| **Class Filter** | Keeps only the object types you list — for example `person, car, dog`. |
+| **OpenCV Preview** | Draws the bounding boxes and labels in a native preview window. |
+| **Alert Output** | Logs detection events on the backend, with a cooldown so you aren't flooded. |
 
-This project is licensed under the GNU Affero General Public License v3.0, the same open-source license used by Ultralytics repositories. See [LICENSE](LICENSE).
+### Choosing CPU or GPU
 
-## Next useful steps
+The **Object Detection** node has a **Device** setting:
 
-- Add persisted workflow import.
-- Add RTSP/IP camera presets.
-- Add inference nodes for ONNX/TensorRT.
-- Add webhook, database, and snapshot output nodes.
+| Setting | What it does |
+| --- | --- |
+| **Auto** | Uses your NVIDIA GPU if one is available, otherwise falls back to CPU. |
+| **CPU** | Always runs on the CPU. Works everywhere, slower. |
+| **CUDA device** | Forces the GPU. Requires a working CUDA + PyTorch install, and reports an error if the GPU can't be used. |
+
+If you're not sure, leave it on **Auto**.
+
+---
+
+## 🗺️ Roadmap
+
+Planned improvements:
+
+- Save and load workflows from a file.
+- Built-in presets for RTSP / IP cameras.
+- Use a monitor / screen as an input source.
+- Extra inference nodes for ONNX and TensorRT.
+- More output nodes: webhooks, database logging, and snapshot saving.
+
+---
+
+## 📄 License
+
+This project is licensed under the **GNU Affero General Public License v3.0** — the same
+open-source license used by Ultralytics. See [LICENSE](LICENSE).
