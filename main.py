@@ -16,11 +16,12 @@ ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 YOLO26_DETECTION_MODELS = ("yolo26n.pt", "yolo26s.pt", "yolo26m.pt", "yolo26l.pt", "yolo26x.pt")
 YOLO26_SEGMENTATION_MODELS = ("yolo26n-seg.pt", "yolo26s-seg.pt", "yolo26m-seg.pt", "yolo26l-seg.pt", "yolo26x-seg.pt")
-YOLO26_MODELS = (*YOLO26_DETECTION_MODELS, *YOLO26_SEGMENTATION_MODELS)
+YOLO26_CLASSIFICATION_MODELS = ("yolo26n-cls.pt", "yolo26s-cls.pt", "yolo26m-cls.pt", "yolo26l-cls.pt", "yolo26x-cls.pt")
+YOLO26_MODELS = (*YOLO26_DETECTION_MODELS, *YOLO26_SEGMENTATION_MODELS, *YOLO26_CLASSIFICATION_MODELS)
 YOLO26_MODEL_SET = set(YOLO26_MODELS)
 INPUT_NODE_ID = "input"
 LEGACY_CAMERA_NODE_ID = "camera"
-INFERENCE_NODE_IDS = ("detector", "segmenter")
+INFERENCE_NODE_IDS = ("detector", "segmenter", "classifier")
 IMAGE_EXTENSIONS = {".bmp", ".dib", ".jpg", ".jpeg", ".jpe", ".jp2", ".png", ".webp", ".pbm", ".pgm", ".ppm", ".pxm", ".pnm", ".tif", ".tiff"}
 MAX_EVENTS = 32
 MAX_TERMINAL_LINES = 500
@@ -379,6 +380,14 @@ def active_segmenter_node(workflow: dict) -> dict | None:
     return None
 
 
+def active_classifier_node(workflow: dict) -> dict | None:
+    classifier = enabled_node(workflow, "classifier")
+    input_id = source_node_id(workflow)
+    if classifier and has_active_path(workflow, input_id, "classifier"):
+        return classifier
+    return None
+
+
 def active_inference_nodes(workflow: dict) -> list[dict]:
     nodes = []
     input_id = source_node_id(workflow)
@@ -516,18 +525,20 @@ class OpenCVInputSource:
 def run_yolo26_frame(frame, inference_node: dict) -> list[dict]:
     config = inference_node.get("config", {})
     source_node_id = inference_node.get("id", "detector")
+    is_classifier = source_node_id == "classifier"
     model_name = config.get("yoloModel") or "yolo26n.pt"
     threshold = float(config.get("threshold", 0.55))
     imgsz = int(config.get("imgsz", 640))
     device, _ = resolve_inference_device(config)
     model = load_yolo_model(model_name, device)
     predict_args = {
-        "conf": threshold,
         "imgsz": imgsz,
         "device": device,
         "verbose": False,
     }
-    if "end2end" in config:
+    if not is_classifier:
+        predict_args["conf"] = threshold
+    if not is_classifier and "end2end" in config:
         predict_args["end2end"] = bool(config.get("end2end"))
 
     try:
@@ -539,6 +550,19 @@ def run_yolo26_frame(frame, inference_node: dict) -> list[dict]:
     detections = []
     for result in results:
         names = result.names or {}
+        probs = getattr(result, "probs", None)
+        if is_classifier and probs is not None:
+            class_id = int(probs.top1)
+            confidence = probs.top1conf
+            if hasattr(confidence, "cpu"):
+                confidence = confidence.cpu().item()
+            detections.append({
+                "class": names.get(class_id, str(class_id)),
+                "score": float(confidence),
+                "sourceNodeId": source_node_id,
+                "kind": "classification",
+            })
+            continue
         if result.boxes is None:
             continue
         boxes = result.boxes.xyxy.cpu().tolist()
@@ -605,10 +629,23 @@ def draw_detections(frame, detections: list[dict], preview: dict) -> None:
     show_labels = bool(config.get("showLabels", True))
     show_masks = bool(config.get("showMasks", True))
     mask_opacity = min(0.85, max(0.05, float(config.get("maskOpacity", 0.35))))
+    classification_y = 12
     for detection in detections:
-        x, y, width, height = [int(round(value)) for value in detection.get("bbox", [0, 0, 0, 0])]
         label_text = detection.get("class", "object")
         color = detection_color(label_text)
+        label = f"{label_text} {round(float(detection.get('score', 0)) * 100)}%"
+        if detection.get("kind") == "classification":
+            if show_labels:
+                text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
+                x = 12
+                y = classification_y
+                cv2.rectangle(frame, (x, y), (x + text_size[0] + 14, y + text_size[1] + 12), (8, 18, 27), -1)
+                cv2.rectangle(frame, (x, y), (x + text_size[0] + 14, y + text_size[1] + 12), color, 2)
+                cv2.putText(frame, label, (x + 7, y + text_size[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+                classification_y += text_size[1] + 18
+            continue
+
+        x, y, width, height = [int(round(value)) for value in detection.get("bbox", [0, 0, 0, 0])]
         mask = detection.get("mask")
         if show_masks and mask:
             points = np.array(mask, dtype=np.int32).reshape((-1, 1, 2))
@@ -619,7 +656,6 @@ def draw_detections(frame, detections: list[dict], preview: dict) -> None:
         if show_boxes:
             cv2.rectangle(frame, (x, y), (x + width, y + height), color, 2)
         if show_labels:
-            label = f"{label_text} {round(float(detection.get('score', 0)) * 100)}%"
             text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
             label_y = max(0, y - text_size[1] - 8)
             cv2.rectangle(frame, (x, label_y), (x + text_size[0] + 10, label_y + text_size[1] + 8), (8, 18, 27), -1)
@@ -711,7 +747,11 @@ class WorkflowRunner:
                         raise RuntimeError("Backend runtime supports Ultralytics YOLO26 only.")
                     model_name = inference_node.get("config", {}).get("yoloModel") or "yolo26n.pt"
                     device, device_label = resolve_inference_device(inference_node.get("config", {}))
-                    task_label = "segmentation" if inference_node.get("id") == "segmenter" else "detector"
+                    task_labels = {
+                        "classifier": "classification",
+                        "segmenter": "segmentation",
+                    }
+                    task_label = task_labels.get(inference_node.get("id"), "detector")
                     self._add_terminal(f"Loading {task_label} model {model_name}")
                     self._add_terminal(f"Using inference device {device_label}")
                     load_yolo_model(model_name, device)
@@ -875,6 +915,7 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
                 "models": list(YOLO26_MODELS),
                 "detectionModels": list(YOLO26_DETECTION_MODELS),
                 "segmentationModels": list(YOLO26_SEGMENTATION_MODELS),
+                "classificationModels": list(YOLO26_CLASSIFICATION_MODELS),
             })
             return
         if path == "/api/workflow/status":

@@ -8,6 +8,7 @@ const NODE_ICONS = {
   input: "file-input",
   detector: "scan-search",
   segmenter: "scissors",
+  classifier: "badge-check",
   filter: "filter",
   preview: "monitor-play",
   alert: "bell-ring",
@@ -27,6 +28,14 @@ const SEGMENTATION_MODEL_OPTIONS = [
   ["yolo26m-seg.pt", "YOLO26 medium segmentation"],
   ["yolo26l-seg.pt", "YOLO26 large segmentation"],
   ["yolo26x-seg.pt", "YOLO26 extra large segmentation"],
+];
+
+const CLASSIFICATION_MODEL_OPTIONS = [
+  ["yolo26n-cls.pt", "YOLO26 nano classification"],
+  ["yolo26s-cls.pt", "YOLO26 small classification"],
+  ["yolo26m-cls.pt", "YOLO26 medium classification"],
+  ["yolo26l-cls.pt", "YOLO26 large classification"],
+  ["yolo26x-cls.pt", "YOLO26 extra large classification"],
 ];
 
 const NODE_BLUEPRINTS = {
@@ -72,6 +81,20 @@ const NODE_BLUEPRINTS = {
       device: "auto",
       imgsz: 640,
       end2end: true,
+    },
+  },
+  classifier: {
+    title: "Object Classification",
+    subtitle: "YOLO26 image label",
+    x: 620,
+    y: 236,
+    config: {
+      engine: "yolo26",
+      threshold: 0.25,
+      intervalMs: 700,
+      yoloModel: "yolo26n-cls.pt",
+      device: "auto",
+      imgsz: 224,
     },
   },
   filter: {
@@ -206,7 +229,7 @@ function normalizeWorkflow(workflow) {
     if (node.type !== "input") {
       node.subtitle = blueprint.subtitle;
     }
-    if (node.type === "detector" || node.type === "segmenter") {
+    if (["detector", "segmenter", "classifier"].includes(node.type)) {
       node.config.engine = "yolo26";
     }
   }
@@ -559,6 +582,25 @@ function renderInspector() {
     }));
   }
 
+  if (node.type === "classifier") {
+    node.config.engine = "yolo26";
+    els.nodeForm.appendChild(makeRangeField("threshold", "Confidence", node.config.threshold, 0.05, 0.95, 0.05, (value) => {
+      node.config.threshold = value;
+    }));
+    els.nodeForm.appendChild(makeNumberField("intervalMs", "Inference interval ms", node.config.intervalMs, 150, 3000, (value) => {
+      node.config.intervalMs = value;
+    }));
+    els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 classification model", node.config.yoloModel || "yolo26n-cls.pt", CLASSIFICATION_MODEL_OPTIONS, (value) => {
+      node.config.yoloModel = value;
+    }));
+    els.nodeForm.appendChild(makeSelectField("device", "Device", node.config.device || "auto", runtimeDeviceOptions(), (value) => {
+      node.config.device = value;
+    }));
+    els.nodeForm.appendChild(makeNumberField("imgsz", "Image size", node.config.imgsz || 224, 64, 640, (value) => {
+      node.config.imgsz = value;
+    }));
+  }
+
   if (node.type === "filter") {
     els.nodeForm.appendChild(makeTextAreaField("classes", "Allowed classes", node.config.classes, (value) => {
       node.config.classes = value;
@@ -802,7 +844,7 @@ async function fetchRuntimeDevices() {
     const response = await fetch("/api/runtime/devices", { cache: "no-store" });
     if (!response.ok) return;
     state.runtimeDevices = await response.json();
-    if (["detector", "segmenter"].includes(selectedNode()?.type)) renderInspector();
+    if (["detector", "segmenter", "classifier"].includes(selectedNode()?.type)) renderInspector();
   } catch (error) {
     console.warn(error);
   }
