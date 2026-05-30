@@ -913,13 +913,19 @@ async function fetchAppVersion() {
 function renderAppVersion(payload) {
   const version = payload.version || "0.0.0";
   state.appVersion = version;
-  els.appVersion.textContent = `v${version}`;
+  els.appVersion.textContent = versionLabel(payload);
 
   const titleParts = [`${payload.app || "VisoNode"} ${version}`];
   if (payload.commit) {
     titleParts.push(`commit ${payload.commit}${payload.dirty ? " + local changes" : ""}`);
   }
   els.appVersion.title = titleParts.join(" | ");
+}
+
+function versionLabel(payload) {
+  const version = payload.version || "0.0.0";
+  if (!payload.commit) return `v${version}`;
+  return `v${version}+${payload.commit}${payload.dirty ? ".dirty" : ""}`;
 }
 
 function renderBackendStatus(payload) {
