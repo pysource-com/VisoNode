@@ -1,2 +1,5 @@
 ultralytics>=8.4.52
 opencv-python>=4.10.0
+
+# Apple Silicon (macOS) only: enables CoreML export so inference can target the Neural Engine.
+coremltools>=8.0 ; sys_platform == "darwin"

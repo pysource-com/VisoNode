@@ -188,6 +188,8 @@ def runtime_devices() -> dict:
         "cudaVersion": None,
         "nvidiaSmi": bool(shutil.which("nvidia-smi")),
         "nvidiaGpus": [],
+        "mpsAvailable": False,
+        "coremlAvailable": False,
         "devices": [],
         "recommendation": "Use CPU, or run scripts\\install-gpu.ps1 on a machine with an NVIDIA GPU.",
     }
@@ -236,7 +238,29 @@ def runtime_devices() -> dict:
                 "name": torch.cuda.get_device_name(index),
                 "memoryMb": round(props.total_memory / (1024 * 1024)),
             })
+
+    # Apple Silicon: Metal Performance Shaders (GPU) backend.
+    mps_backend = getattr(torch.backends, "mps", None)
+    payload["mpsAvailable"] = bool(mps_backend and mps_backend.is_available())
+    if payload["mpsAvailable"]:
+        payload["devices"].append({"id": "mps", "name": "Apple GPU (Metal)"})
+
+    # Apple Silicon: CoreML runtime can dispatch to the Neural Engine (ANE).
+    try:
+        import coremltools  # noqa: F401
+
+        payload["coremlAvailable"] = True
+    except ImportError:
+        payload["coremlAvailable"] = False
+    if payload["coremlAvailable"]:
+        payload["devices"].append({"id": "coreml", "name": "Apple Neural Engine (CoreML)"})
+
+    if payload["cudaAvailable"]:
         payload["recommendation"] = "CUDA is available. Select Auto or a CUDA device in Object Detection."
+    elif payload["mpsAvailable"] and payload["coremlAvailable"]:
+        payload["recommendation"] = "Apple Silicon detected. Auto uses the Apple GPU (MPS); pick CoreML to target the Neural Engine."
+    elif payload["mpsAvailable"]:
+        payload["recommendation"] = "Apple Silicon detected. Auto uses the Apple GPU (MPS). Install coremltools to also target the Neural Engine."
     elif payload["nvidiaGpus"]:
         payload["recommendation"] = "NVIDIA GPU detected, but PyTorch CUDA is unavailable. Run scripts\\install-gpu.ps1."
     return payload
@@ -251,10 +275,30 @@ def resolve_inference_device(config: dict) -> tuple[str, str]:
             return "cpu", "CPU"
         if torch.cuda.is_available():
             return "cuda:0", f"CUDA 0 - {torch.cuda.get_device_name(0)}"
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend and mps_backend.is_available():
+            return "mps", "Apple GPU (MPS)"
         return "cpu", "CPU"
 
     if requested == "cpu":
         return "cpu", "CPU"
+
+    if requested == "mps":
+        try:
+            import torch
+        except ImportError as exc:
+            raise RuntimeError("MPS was selected, but PyTorch is not installed. Run 'pip install -r requirements.txt'.") from exc
+        mps_backend = getattr(torch.backends, "mps", None)
+        if not (mps_backend and mps_backend.is_available()):
+            raise RuntimeError("MPS was selected, but it is unavailable (requires Apple Silicon and a recent PyTorch build).")
+        return "mps", "Apple GPU (MPS)"
+
+    if requested == "coreml":
+        try:
+            import coremltools  # noqa: F401
+        except ImportError as exc:
+            raise RuntimeError("CoreML was selected, but coremltools is not installed. Run 'pip install coremltools'.") from exc
+        return "coreml", "Apple Neural Engine (CoreML)"
 
     if requested.isdigit():
         requested = f"cuda:{requested}"
@@ -276,11 +320,12 @@ def resolve_inference_device(config: dict) -> tuple[str, str]:
     raise RuntimeError(f"Unsupported inference device '{requested}'.")
 
 
-def load_yolo_model(model_name: str, device: str = "cpu"):
+def load_yolo_model(model_name: str, device: str = "cpu", imgsz: int = 640):
     if model_name not in YOLO26_MODEL_SET:
         raise ValueError(f"Unsupported YOLO26 model '{model_name}'.")
 
-    cache_key = (model_name, device)
+    # CoreML packages bake in a fixed input size, so they are cached per imgsz.
+    cache_key = (model_name, device, imgsz if device == "coreml" else None)
     with _model_lock:
         if cache_key in _model_cache:
             return _model_cache[cache_key]
@@ -288,13 +333,43 @@ def load_yolo_model(model_name: str, device: str = "cpu"):
             from ultralytics import YOLO
         except ImportError as exc:
             raise RuntimeError(
-                "Ultralytics is not installed. Run '.\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt'."
+                "Ultralytics is not installed. Run 'pip install -r requirements.txt'."
             ) from exc
 
-        model = YOLO(model_name)
-        model.to(device)
+        if device == "coreml":
+            model = _load_coreml_model(YOLO, model_name, imgsz)
+        else:
+            model = YOLO(model_name)
+            model.to(device)
         _model_cache[cache_key] = model
         return model
+
+
+def _load_coreml_model(yolo_cls, model_name: str, imgsz: int):
+    """Export the YOLO26 weights to a CoreML package once, then load that package.
+
+    Running the .mlpackage lets CoreML dispatch the network to the Apple Neural
+    Engine (or the GPU/CPU) instead of the PyTorch runtime. The export is cached
+    on disk per input size so it only happens on the first use.
+    """
+    export_path = ROOT / f"{Path(model_name).stem}_{imgsz}.mlpackage"
+    if not export_path.exists():
+        terminal_log(f"Exporting {model_name} to CoreML at {imgsz}px (one-time, this can take a minute)...")
+        try:
+            produced = Path(yolo_cls(model_name).export(format="coreml", imgsz=imgsz, nms=True))
+        except Exception as exc:
+            raise RuntimeError(
+                f"CoreML export of {model_name} failed ({type(exc).__name__}: {exc}). "
+                "This usually means the installed torch and coremltools versions are incompatible "
+                "(coremltools tracks older torch releases). Retry the run, pin a coremltools-tested "
+                "torch build, or select the MPS device instead."
+            ) from exc
+        if produced.resolve() != export_path.resolve():
+            if export_path.exists():
+                shutil.rmtree(export_path)
+            shutil.move(str(produced), str(export_path))
+        terminal_log(f"CoreML model ready: {export_path.name}")
+    return yolo_cls(str(export_path), task="detect")
 
 
 def enabled_node(workflow: dict, node_id: str) -> dict | None:
@@ -489,13 +564,15 @@ def detect_yolo26_frame(frame, detector: dict) -> list[dict]:
     threshold = float(config.get("threshold", 0.55))
     imgsz = int(config.get("imgsz", 640))
     device, _ = resolve_inference_device(config)
-    model = load_yolo_model(model_name, device)
+    model = load_yolo_model(model_name, device, imgsz)
     predict_args = {
         "conf": threshold,
         "imgsz": imgsz,
-        "device": device,
         "verbose": False,
     }
+    if device != "coreml":
+        # CoreML packages run on their own runtime; a torch device string is invalid here.
+        predict_args["device"] = device
     if "end2end" in config:
         predict_args["end2end"] = bool(config.get("end2end"))
 
@@ -641,10 +718,11 @@ class WorkflowRunner:
                 if engine != "yolo26":
                     raise RuntimeError("Backend runtime supports Ultralytics YOLO26 only.")
                 model_name = detector.get("config", {}).get("yoloModel") or "yolo26n.pt"
+                imgsz = int(detector.get("config", {}).get("imgsz", 640))
                 device, device_label = resolve_inference_device(detector.get("config", {}))
                 self._add_terminal(f"Loading detector model {model_name}")
                 self._add_terminal(f"Using inference device {device_label}")
-                load_yolo_model(model_name, device)
+                load_yolo_model(model_name, device, imgsz)
                 self._set_status(state="running", model=model_name, device=device_label)
                 self._add_terminal(f"Loaded detector model {model_name}")
             else:

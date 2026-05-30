@@ -18,6 +18,16 @@ Install Python dependencies first. The default install uses the normal Python pa
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
+On Apple Silicon Macs (M1–M5), the default install already includes Metal (MPS) GPU acceleration and CoreML support — use a virtual environment instead of the PowerShell paths:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+`coremltools` is installed automatically on macOS, so both the Apple GPU (MPS) and the CoreML / Neural Engine device are available without any extra step.
+
 For NVIDIA GPU acceleration, install the CUDA-enabled PyTorch build before running the app:
 
 ```powershell
@@ -50,14 +60,16 @@ Open the editor, configure the graph, then click **Run**. Python opens the confi
 
 The Object Detection node includes a **Device** setting:
 
-- Auto: uses CUDA when PyTorch can see an NVIDIA GPU, otherwise CPU.
+- Auto: uses CUDA when PyTorch sees an NVIDIA GPU, then the Apple GPU (MPS) on Apple Silicon, otherwise CPU.
 - CPU: always runs inference on CPU.
 - CUDA devices: require a working CUDA-enabled PyTorch install and fail loudly if CUDA is unavailable.
+- MPS (Apple GPU): runs on the Metal GPU of Apple Silicon Macs. Available automatically with the default macOS install.
+- CoreML (Apple Neural Engine): exports the model to a CoreML package on first use, then runs it through the Neural Engine/GPU — the fastest option in local testing. Requires `coremltools` (installed automatically on macOS). The export is cached per input size, so only the first run is slow. Note: the CoreML *export* depends on the installed `torch`/`coremltools` versions matching; with bleeding-edge PyTorch the export can occasionally fail, in which case the app reports it clearly and you can retry or use the MPS device.
 
 ## Current nodes
 
 - Input: chooses camera or file mode. Camera mode accepts an OpenCV camera index, stream URL, or capture source plus resolution. File mode accepts a local image or video path and can loop video files.
-- Object Detection: selects Ultralytics YOLO26 model, confidence threshold, inference interval, and CPU/GPU device.
+- Object Detection: selects Ultralytics YOLO26 model, confidence threshold, inference interval, and the inference device (CPU, NVIDIA GPU, or Apple Silicon GPU/Neural Engine).
 - Class Filter: passes only configured classes such as `person, car, dog`.
 - OpenCV Preview: draws bounding boxes and labels in a native OpenCV window.
 - Alert Output: writes backend detection events with a cooldown.

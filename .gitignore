@@ -19,6 +19,8 @@ Thumbs.db
 *.ckpt
 *.onnx
 *.engine
+*.mlpackage
+*.mlmodel
 *.tflite
 *.pb
 *.h5

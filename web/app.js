@@ -567,7 +567,10 @@ function runtimeDeviceOptions() {
   ];
   for (const device of state.runtimeDevices.devices || []) {
     const memoryGb = device.memoryMb ? ` ${Math.round(device.memoryMb / 1024)}GB` : "";
-    options.push([device.id, `${device.id.toUpperCase()} ${device.name}${memoryGb}`]);
+    const label = device.id.startsWith("cuda")
+      ? `${device.id.toUpperCase()} ${device.name}${memoryGb}`
+      : `${device.name}${memoryGb}`;
+    options.push([device.id, label]);
   }
   if (!state.runtimeDevices.devices?.length && state.runtimeDevices.nvidiaGpus?.length) {
     options.push(["cuda-unavailable", "CUDA unavailable - run install-gpu.ps1", true]);
