@@ -61,7 +61,6 @@ const NODE_BLUEPRINTS = {
     config: {
       engine: "yolo26",
       threshold: 0.55,
-      intervalMs: 450,
       yoloModel: "yolo26n.pt",
       device: "auto",
       imgsz: 640,
@@ -76,7 +75,6 @@ const NODE_BLUEPRINTS = {
     config: {
       engine: "yolo26",
       threshold: 0.55,
-      intervalMs: 650,
       yoloModel: "yolo26n-seg.pt",
       samCheckpoint: "",
       concepts: "person",
@@ -93,7 +91,6 @@ const NODE_BLUEPRINTS = {
     config: {
       engine: "yolo26",
       threshold: 0.25,
-      intervalMs: 700,
       yoloModel: "yolo26n-cls.pt",
       device: "auto",
       imgsz: 224,
@@ -243,6 +240,9 @@ function normalizeWorkflow(workflow) {
     if (node.type === "segmenter" && node.config.samModel && !node.config.samCheckpoint) {
       node.config.samCheckpoint = node.config.samModel === "sam3.pt" ? "" : node.config.samModel;
       delete node.config.samModel;
+    }
+    if (["detector", "segmenter", "classifier"].includes(node.type)) {
+      delete node.config.intervalMs;
     }
   }
   return workflow;
@@ -565,9 +565,6 @@ function renderInspector() {
     els.nodeForm.appendChild(makeRangeField("threshold", "Confidence", node.config.threshold, 0.1, 0.95, 0.05, (value) => {
       node.config.threshold = value;
     }));
-    els.nodeForm.appendChild(makeNumberField("intervalMs", "Inference interval ms", node.config.intervalMs, 150, 2000, (value) => {
-      node.config.intervalMs = value;
-    }));
     els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 model", node.config.yoloModel || "yolo26n.pt", DETECTION_MODEL_OPTIONS, (value) => {
       node.config.yoloModel = value;
     }));
@@ -592,9 +589,6 @@ function renderInspector() {
     }));
     els.nodeForm.appendChild(makeRangeField("threshold", "Confidence", node.config.threshold, 0.1, 0.95, 0.05, (value) => {
       node.config.threshold = value;
-    }));
-    els.nodeForm.appendChild(makeNumberField("intervalMs", "Inference interval ms", node.config.intervalMs, 150, 3000, (value) => {
-      node.config.intervalMs = value;
     }));
     if ((node.config.engine || "yolo26") === "sam3") {
       els.nodeForm.appendChild(makeTextField("samCheckpoint", "SAM 3 checkpoint path", node.config.samCheckpoint || "", (value) => {
@@ -625,9 +619,6 @@ function renderInspector() {
     node.config.engine = "yolo26";
     els.nodeForm.appendChild(makeRangeField("threshold", "Confidence", node.config.threshold, 0.05, 0.95, 0.05, (value) => {
       node.config.threshold = value;
-    }));
-    els.nodeForm.appendChild(makeNumberField("intervalMs", "Inference interval ms", node.config.intervalMs, 150, 3000, (value) => {
-      node.config.intervalMs = value;
     }));
     els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 classification model", node.config.yoloModel || "yolo26n-cls.pt", CLASSIFICATION_MODEL_OPTIONS, (value) => {
       node.config.yoloModel = value;

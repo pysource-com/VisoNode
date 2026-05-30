@@ -392,11 +392,13 @@ def load_sam3_processor(config: dict, device: str = "cpu"):
             ) from exc
 
         try:
+            builder_device = "cuda" if device.startswith("cuda") else device
             model = build_sam3_image_model(
                 checkpoint_path=str(checkpoint_path) if checkpoint_path else None,
-                device=device,
+                device=builder_device,
                 load_from_HF=checkpoint_path is None,
             )
+            model.to(device)
         except Exception as exc:
             raise RuntimeError(
                 "Unable to load Meta SAM 3. If you are using Hugging Face download, request access to facebook/sam3 and run 'hf auth login'."
@@ -697,8 +699,11 @@ def run_yolo26_frame(frame, inference_node: dict) -> list[dict]:
 
 
 def run_sam3_frame(frame, inference_node: dict) -> list[dict]:
+    from contextlib import nullcontext
+
     import cv2
     import numpy as np
+    import torch
     from PIL import Image
 
     config = inference_node.get("config", {})
@@ -707,13 +712,20 @@ def run_sam3_frame(frame, inference_node: dict) -> list[dict]:
     processor = load_sam3_processor(config, device)
     concepts = sam3_concepts(config)
     image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    image_state = processor.set_image(image)
+    def sam3_autocast():
+        if device.startswith("cuda"):
+            return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        return nullcontext()
+
+    with sam3_autocast():
+        image_state = processor.set_image(image)
 
     detections = []
     for concept in concepts:
         prompt_state = dict(image_state)
         prompt_state["backbone_out"] = dict(image_state["backbone_out"])
-        output = processor.set_text_prompt(state=prompt_state, prompt=concept)
+        with sam3_autocast():
+            output = processor.set_text_prompt(state=prompt_state, prompt=concept)
         masks = output.get("masks")
         boxes = output.get("boxes")
         scores = output.get("scores")
@@ -935,7 +947,6 @@ class WorkflowRunner:
             self._add_terminal("Workflow running")
 
             while not self._stop_event.is_set():
-                loop_started_at = time.monotonic()
                 ok, frame = input_source.read()
                 if not ok:
                     raise RuntimeError("Input frame could not be read.")
@@ -943,13 +954,10 @@ class WorkflowRunner:
                 frame_detections = detections if input_source.is_static else []
                 frame_filtered = filtered if input_source.is_static else []
                 inference_nodes = active_inference_nodes(workflow)
-                interval = 0.0
                 if inference_nodes:
-                    intervals = []
                     detections = []
                     for inference_node in inference_nodes:
                         config = inference_node.get("config", {})
-                        intervals.append(max(0.05, float(config.get("intervalMs", 450)) / 1000))
                         threshold = float(config.get("threshold", 0.55))
                         engine = config.get("engine", "yolo26")
                         if engine == "sam3":
@@ -962,7 +970,6 @@ class WorkflowRunner:
                             item for item in node_detections
                             if float(item.get("score", 0)) >= threshold
                         )
-                    interval = min(intervals)
                     filter_candidates = (
                         inference_results_for_node(workflow, "filter", detections)
                         if active_filter_node(workflow)
@@ -1023,25 +1030,6 @@ class WorkflowRunner:
                     )
                     frame_count = 0
                     last_fps_at = now
-
-                if inference_nodes and interval > 0 and not self._stop_event.is_set():
-                    remaining = interval - (time.monotonic() - loop_started_at)
-                    if remaining > 0:
-                        if preview_shown:
-                            deadline = time.monotonic() + remaining
-                            while not self._stop_event.is_set():
-                                remaining_ms = int((deadline - time.monotonic()) * 1000)
-                                if remaining_ms <= 1:
-                                    break
-                                wait_ms = min(50, remaining_ms)
-                                key = cv2.waitKey(wait_ms) & 0xFF
-                                if key in (27, ord("q")):
-                                    self._stop_event.set()
-                                    break
-                                if time.monotonic() >= deadline:
-                                    break
-                        else:
-                            self._stop_event.wait(remaining)
         except Exception as exc:
             self._set_status(running=False, state="error", error=str(exc))
             self._add_event("Workflow error", str(exc))

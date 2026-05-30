@@ -2,4 +2,6 @@ ultralytics>=8.4.52
 numpy>=1.26,<2
 opencv-python==4.10.0.84
 einops>=0.8.2
+pycocotools>=2.0.11
+triton-windows>=3.7.0.post26; sys_platform == "win32"
 git+https://github.com/facebookresearch/sam3.git
