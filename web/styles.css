@@ -68,6 +68,12 @@ button { cursor: pointer; }
 
 .brand { display: flex; align-items: center; gap: 12px; }
 
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .brand-mark {
   width: 32px;
   height: 32px;
@@ -88,6 +94,21 @@ h1 {
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--ink);
+}
+
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .topbar p {
@@ -380,7 +401,7 @@ label span,
   display: grid;
   grid-template-columns: 44px 1fr;
   overflow: hidden;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .workflow-node:hover {
   border-color: var(--muted-2);

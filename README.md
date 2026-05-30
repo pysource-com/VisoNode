@@ -42,6 +42,20 @@ Press **Stop**, `q`, or `Esc` to stop.
 
 ---
 
+## Versioning
+
+The running version is shown in the top bar next to **VisoNode**.
+
+The version source of truth is [`web/version.json`](web/version.json). Update that file before a release. Python also reads it for:
+
+```powershell
+.\.venv\Scripts\python.exe main.py --version
+```
+
+When the backend is restarted, `/api/app/version` also reports the app version and current Git commit.
+
+---
+
 ## ✨ Highlights
 
 - **No code.** Build the whole pipeline by connecting nodes in the browser.

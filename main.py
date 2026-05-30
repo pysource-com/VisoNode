@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
+VERSION_FILE = WEB_ROOT / "version.json"
 YOLO26_DETECTION_MODELS = ("yolo26n.pt", "yolo26s.pt", "yolo26m.pt", "yolo26l.pt", "yolo26x.pt")
 YOLO26_SEGMENTATION_MODELS = ("yolo26n-seg.pt", "yolo26s-seg.pt", "yolo26m-seg.pt", "yolo26l-seg.pt", "yolo26x-seg.pt")
 YOLO26_CLASSIFICATION_MODELS = ("yolo26n-cls.pt", "yolo26s-cls.pt", "yolo26m-cls.pt", "yolo26l-cls.pt", "yolo26x-cls.pt")
@@ -29,6 +30,46 @@ MAX_TERMINAL_LINES = 500
 
 _model_cache = {}
 _model_lock = Lock()
+
+
+def load_version_info() -> dict:
+    try:
+        with VERSION_FILE.open("r", encoding="utf-8") as version_file:
+            payload = json.load(version_file)
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    app = str(payload.get("app") or "VisoNode")
+    version = str(payload.get("version") or "0.0.0")
+    return {"app": app, "version": version}
+
+
+VERSION_INFO = load_version_info()
+APP_VERSION = VERSION_INFO["version"]
+
+
+def git_version_info() -> dict:
+    try:
+        commit_result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        dirty_result = subprocess.run(
+            ["git", "diff", "--quiet"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {"commit": None, "dirty": None}
+    return {
+        "commit": commit_result.stdout.strip() or None,
+        "dirty": dirty_result.returncode != 0,
+    }
 
 
 class TerminalBuffer:
@@ -1042,6 +1083,13 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == "/api/app/version":
+            json_response(self, 200, {
+                **VERSION_INFO,
+                **git_version_info(),
+                "versionFile": VERSION_FILE.name,
+            })
+            return
         if path == "/api/yolo26/models":
             json_response(self, 200, {
                 "models": list(YOLO26_MODELS),
@@ -1104,6 +1152,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run VisoNode, the no-code computer vision workflow builder."
     )
+    parser.add_argument("--version", action="version", version=f"VisoNode {APP_VERSION}")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
     return parser.parse_args()
@@ -1112,7 +1161,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     server = ThreadingHTTPServer((args.host, args.port), NoCacheHandler)
-    terminal_log(f"VisoNode running at http://{args.host}:{args.port}")
+    terminal_log(f"VisoNode v{APP_VERSION} running at http://{args.host}:{args.port}")
     terminal_log("The browser edits the workflow; Python owns capture, inference, and OpenCV display.")
     terminal_log("Press Ctrl+C to stop.")
     try:

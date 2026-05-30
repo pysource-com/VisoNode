@@ -161,6 +161,8 @@ const state = {
   terminalPollTimer: null,
   terminalAutoScroll: true,
   contextMenuNodeId: null,
+  edgeRenderFrame: null,
+  appVersion: null,
   runtimeDevices: {
     nvidiaGpus: [],
     cudaAvailable: false,
@@ -177,6 +179,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateNodeStatuses();
   renderInspector();
   renderEdges();
+  fetchAppVersion();
   pollBackendStatus();
   fetchRuntimeDevices();
   startTerminalPolling();
@@ -262,6 +265,7 @@ function cacheElements() {
   els.fpsValue = document.getElementById("fpsValue");
   els.objectCount = document.getElementById("objectCount");
   els.deviceValue = document.getElementById("deviceValue");
+  els.appVersion = document.getElementById("appVersion");
   els.terminalPanel = document.getElementById("terminalPanel");
   els.terminalHeader = document.getElementById("terminalHeader");
   els.terminalBody = document.getElementById("terminalBody");
@@ -447,9 +451,11 @@ function renderWorkflow() {
     els.nodeLayer.appendChild(element);
   }
   if (window.lucide) window.lucide.createIcons();
+  scheduleEdgeRender();
 }
 
 function renderEdges() {
+  state.edgeRenderFrame = null;
   const rect = els.workflowCanvas.getBoundingClientRect();
   els.edgeLayer.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
   els.edgeLayer.innerHTML = "";
@@ -457,10 +463,12 @@ function renderEdges() {
     const from = getNode(fromId);
     const to = getNode(toId);
     if (!from || !to) return;
-    const startX = from.x + NODE_WIDTH;
-    const startY = from.y + NODE_PORT_Y;
-    const endX = to.x;
-    const endY = to.y + NODE_PORT_Y;
+    const start = portPoint(fromId, "out");
+    const end = portPoint(toId, "in");
+    const startX = start.x;
+    const startY = start.y;
+    const endX = end.x;
+    const endY = end.y;
     const d = connectionPath(startX, startY, endX, endY);
     const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
     hitPath.setAttribute("d", d);
@@ -499,6 +507,11 @@ function renderEdges() {
     path.classList.add("edge-path", "preview");
     els.edgeLayer.appendChild(path);
   }
+}
+
+function scheduleEdgeRender() {
+  if (state.edgeRenderFrame) return;
+  state.edgeRenderFrame = window.requestAnimationFrame(renderEdges);
 }
 
 function renderInspector() {
@@ -876,6 +889,39 @@ async function fetchRuntimeDevices() {
   }
 }
 
+async function fetchAppVersion() {
+  let payload = null;
+  try {
+    const response = await fetch("/api/app/version", { cache: "no-store" });
+    if (response.ok) payload = await response.json();
+  } catch (error) {
+    console.warn(error);
+  }
+
+  if (!payload) {
+    try {
+      const response = await fetch("/version.json", { cache: "no-store" });
+      if (response.ok) payload = await response.json();
+    } catch (error) {
+      console.warn(error);
+    }
+  }
+
+  if (payload) renderAppVersion(payload);
+}
+
+function renderAppVersion(payload) {
+  const version = payload.version || "0.0.0";
+  state.appVersion = version;
+  els.appVersion.textContent = `v${version}`;
+
+  const titleParts = [`${payload.app || "VisoNode"} ${version}`];
+  if (payload.commit) {
+    titleParts.push(`commit ${payload.commit}${payload.dirty ? " + local changes" : ""}`);
+  }
+  els.appVersion.title = titleParts.join(" | ");
+}
+
 function renderBackendStatus(payload) {
   state.running = Boolean(payload.running);
   setStatus(titleCase(payload.state || "idle"));
@@ -1006,6 +1052,28 @@ function getNode(id) {
   return state.workflow.nodes.find((node) => node.id === id);
 }
 
+function nodeElement(id) {
+  return Array.from(els.nodeLayer.children).find((element) => element.dataset.nodeId === id);
+}
+
+function portPoint(nodeId, port) {
+  const node = getNode(nodeId);
+  const canvasRect = els.workflowCanvas.getBoundingClientRect();
+  const portElement = nodeElement(nodeId)?.querySelector(`[data-port="${port}"]`);
+  if (portElement) {
+    const portRect = portElement.getBoundingClientRect();
+    return {
+      x: portRect.left + portRect.width / 2 - canvasRect.left,
+      y: portRect.top + portRect.height / 2 - canvasRect.top,
+    };
+  }
+
+  return {
+    x: node.x + (port === "out" ? NODE_WIDTH : 0),
+    y: node.y + NODE_PORT_Y,
+  };
+}
+
 function isGraphNodeActive(id) {
   const node = getNode(id);
   if (!node?.enabled) return false;
@@ -1083,12 +1151,13 @@ function startConnection(event, nodeId) {
   event.stopPropagation();
   const node = getNode(nodeId);
   if (!node) return;
+  const start = portPoint(nodeId, "out");
   state.connecting = {
     fromId: nodeId,
-    startX: node.x + NODE_WIDTH,
-    startY: node.y + NODE_PORT_Y,
-    currentX: node.x + NODE_WIDTH,
-    currentY: node.y + NODE_PORT_Y,
+    startX: start.x,
+    startY: start.y,
+    currentX: start.x,
+    currentY: start.y,
   };
   selectNode(nodeId);
   renderEdges();
