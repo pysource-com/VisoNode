@@ -19,6 +19,7 @@ YOLO26_SEGMENTATION_MODELS = ("yolo26n-seg.pt", "yolo26s-seg.pt", "yolo26m-seg.p
 YOLO26_CLASSIFICATION_MODELS = ("yolo26n-cls.pt", "yolo26s-cls.pt", "yolo26m-cls.pt", "yolo26l-cls.pt", "yolo26x-cls.pt")
 YOLO26_MODELS = (*YOLO26_DETECTION_MODELS, *YOLO26_SEGMENTATION_MODELS, *YOLO26_CLASSIFICATION_MODELS)
 YOLO26_MODEL_SET = set(YOLO26_MODELS)
+SAM3_MODELS = ("facebook/sam3",)
 INPUT_NODE_ID = "input"
 LEGACY_CAMERA_NODE_ID = "camera"
 INFERENCE_NODE_IDS = ("detector", "segmenter", "classifier")
@@ -299,6 +300,70 @@ def load_yolo_model(model_name: str, device: str = "cpu"):
         model.to(device)
         _model_cache[cache_key] = model
         return model
+
+
+def resolve_model_file(value: str, default_name: str = "") -> Path:
+    model_path = Path(str(value or default_name).strip().strip('"') or default_name).expanduser()
+    if not model_path.is_absolute():
+        model_path = ROOT / model_path
+    return model_path.resolve()
+
+
+def sam3_concepts(config: dict) -> list[str]:
+    concepts = [
+        item.strip()
+        for item in str(config.get("concepts") or "person").split(",")
+        if item.strip()
+    ]
+    if not concepts:
+        raise RuntimeError("SAM 3 concept prompts are empty. Add one or more noun phrases, for example 'person, car'.")
+    return concepts
+
+
+def sam3_checkpoint_path(config: dict) -> Path | None:
+    raw_value = str(config.get("samCheckpoint") or "").strip().strip('"')
+    if not raw_value:
+        return None
+    checkpoint_path = resolve_model_file(raw_value)
+    if not checkpoint_path.exists():
+        raise RuntimeError(f"SAM 3 checkpoint was not found at {checkpoint_path}.")
+    return checkpoint_path
+
+
+def load_sam3_processor(config: dict, device: str = "cpu"):
+    checkpoint_path = sam3_checkpoint_path(config)
+    threshold = float(config.get("threshold", 0.25))
+    imgsz = int(config.get("imgsz", 640))
+    cache_key = ("official-sam3", str(checkpoint_path or "hf"), device, threshold, imgsz)
+    with _model_lock:
+        if cache_key in _model_cache:
+            return _model_cache[cache_key]
+        try:
+            from sam3.model.sam3_image_processor import Sam3Processor
+            from sam3.model_builder import build_sam3_image_model
+        except ImportError as exc:
+            if getattr(exc, "name", "") == "triton":
+                raise RuntimeError(
+                    "Meta's official SAM 3 package requires Triton and the official CUDA/Linux stack. Use WSL/Linux with CUDA 12.6+ and PyTorch 2.7+, or install a compatible Triton build for this environment."
+                ) from exc
+            raise RuntimeError(
+                "Meta's official SAM 3 package is not installed. Run '.\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt'."
+            ) from exc
+
+        try:
+            model = build_sam3_image_model(
+                checkpoint_path=str(checkpoint_path) if checkpoint_path else None,
+                device=device,
+                load_from_HF=checkpoint_path is None,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Unable to load Meta SAM 3. If you are using Hugging Face download, request access to facebook/sam3 and run 'hf auth login'."
+            ) from exc
+
+        processor = Sam3Processor(model, resolution=imgsz, device=device, confidence_threshold=threshold)
+        _model_cache[cache_key] = processor
+        return processor
 
 
 def enabled_node(workflow: dict, node_id: str) -> dict | None:
@@ -590,6 +655,52 @@ def run_yolo26_frame(frame, inference_node: dict) -> list[dict]:
     return detections
 
 
+def run_sam3_frame(frame, inference_node: dict) -> list[dict]:
+    import cv2
+    import numpy as np
+    from PIL import Image
+
+    config = inference_node.get("config", {})
+    source_node_id = inference_node.get("id", "segmenter")
+    device, _ = resolve_inference_device(config)
+    processor = load_sam3_processor(config, device)
+    concepts = sam3_concepts(config)
+    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    image_state = processor.set_image(image)
+
+    detections = []
+    for concept in concepts:
+        prompt_state = dict(image_state)
+        prompt_state["backbone_out"] = dict(image_state["backbone_out"])
+        output = processor.set_text_prompt(state=prompt_state, prompt=concept)
+        masks = output.get("masks")
+        boxes = output.get("boxes")
+        scores = output.get("scores")
+        if masks is None or boxes is None or scores is None:
+            continue
+        boxes = boxes.detach().cpu().tolist()
+        scores = scores.detach().cpu().tolist()
+        masks = masks.detach().cpu().numpy()
+        for index, (box, score) in enumerate(zip(boxes, scores)):
+            x1, y1, x2, y2 = [float(value) for value in box]
+            detection = {
+                "class": concept,
+                "score": float(score),
+                "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
+                "sourceNodeId": source_node_id,
+                "kind": "segmentation",
+            }
+            if index < len(masks):
+                mask = np.squeeze(masks[index]).astype(np.uint8)
+                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    contour = max(contours, key=cv2.contourArea).reshape(-1, 2)
+                    if len(contour) >= 3:
+                        detection["mask"] = [[float(point[0]), float(point[1])] for point in contour]
+            detections.append(detection)
+    return detections
+
+
 def filter_detections(workflow: dict, detections: list[dict]) -> list[dict]:
     filter_node = active_filter_node(workflow)
     if not filter_node:
@@ -743,18 +854,33 @@ class WorkflowRunner:
                 device_labels = []
                 for inference_node in inference_nodes:
                     engine = inference_node.get("config", {}).get("engine", "yolo26")
-                    if engine != "yolo26":
-                        raise RuntimeError("Backend runtime supports Ultralytics YOLO26 only.")
-                    model_name = inference_node.get("config", {}).get("yoloModel") or "yolo26n.pt"
+                    if engine not in ("yolo26", "sam3"):
+                        raise RuntimeError(f"Backend runtime does not support inference engine '{engine}'.")
+                    if engine == "sam3" and inference_node.get("id") != "segmenter":
+                        raise RuntimeError("SAM 3 is available only on the Object Segmentation node.")
+                    config = inference_node.get("config", {})
+                    checkpoint_path = sam3_checkpoint_path(config) if engine == "sam3" else None
+                    model_name = (
+                        str(checkpoint_path or "facebook/sam3")
+                        if engine == "sam3"
+                        else config.get("yoloModel") or "yolo26n.pt"
+                    )
                     device, device_label = resolve_inference_device(inference_node.get("config", {}))
                     task_labels = {
                         "classifier": "classification",
                         "segmenter": "segmentation",
                     }
                     task_label = task_labels.get(inference_node.get("id"), "detector")
+                    if engine == "sam3":
+                        task_label = f"SAM 3 {task_label}"
                     self._add_terminal(f"Loading {task_label} model {model_name}")
                     self._add_terminal(f"Using inference device {device_label}")
-                    load_yolo_model(model_name, device)
+                    if engine == "sam3":
+                        concepts = ", ".join(sam3_concepts(config))
+                        self._add_terminal(f"SAM 3 concept prompt(s): {concepts}")
+                        load_sam3_processor(config, device)
+                    else:
+                        load_yolo_model(model_name, device)
                     loaded_models.append(model_name)
                     device_labels.append(device_label)
                     self._add_terminal(f"Loaded {task_label} model {model_name}")
@@ -784,7 +910,13 @@ class WorkflowRunner:
                         config = inference_node.get("config", {})
                         intervals.append(max(0.05, float(config.get("intervalMs", 450)) / 1000))
                         threshold = float(config.get("threshold", 0.55))
-                        node_detections = run_yolo26_frame(frame, inference_node)
+                        engine = config.get("engine", "yolo26")
+                        if engine == "sam3":
+                            node_detections = run_sam3_frame(frame, inference_node)
+                        elif engine == "yolo26":
+                            node_detections = run_yolo26_frame(frame, inference_node)
+                        else:
+                            raise RuntimeError(f"Backend runtime does not support inference engine '{engine}'.")
                         detections.extend(
                             item for item in node_detections
                             if float(item.get("score", 0)) >= threshold
@@ -916,6 +1048,7 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
                 "detectionModels": list(YOLO26_DETECTION_MODELS),
                 "segmentationModels": list(YOLO26_SEGMENTATION_MODELS),
                 "classificationModels": list(YOLO26_CLASSIFICATION_MODELS),
+                "samModels": list(SAM3_MODELS),
             })
             return
         if path == "/api/workflow/status":

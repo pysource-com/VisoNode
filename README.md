@@ -9,7 +9,7 @@ all by dragging and linking boxes in your browser. No machine learning experienc
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Python](https://img.shields.io/badge/python-3.13-blue?logo=python&logoColor=white)
-![Model](https://img.shields.io/badge/model-Ultralytics%20YOLO26-purple)
+![Model](https://img.shields.io/badge/model-Ultralytics%20YOLO26%20%2B%20SAM3-purple)
 ![Runs locally](https://img.shields.io/badge/runs-100%25%20local-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
@@ -46,7 +46,7 @@ Press **Stop**, `q`, or `Esc` to stop.
 
 - **No code.** Build the whole pipeline by connecting nodes in the browser.
 - **100% local.** Your camera and video never leave your computer — nothing is sent to the cloud.
-- **State-of-the-art detection, segmentation, and classification.** Powered by Ultralytics **YOLO26**.
+- **State-of-the-art detection, segmentation, and classification.** Powered by Ultralytics **YOLO26** plus Meta's official **SAM 3** concept segmentation.
 - **CPU or GPU.** Works on any machine; uses your NVIDIA GPU automatically when available.
 - **Live feedback.** See frame rate, object count, and the active device in real time.
 - **Flexible inputs.** Webcams, stream URLs, capture devices, or local image/video files.
@@ -78,6 +78,12 @@ preview window showing the live detections. In the editor, each node turns green
 
 > **First run note:** the first time you use Object Detection, it automatically downloads the
 > YOLO26 model weights (for example `yolo26n.pt`). This happens once and may take a moment.
+> SAM 3 uses Meta's official implementation. Request access to `facebook/sam3` on Hugging Face,
+> run `hf auth login`, then choose **SAM 3 concept segmentation**. You can also set a local
+> checkpoint path in Object Segmentation.
+>
+> Meta's official SAM 3 prerequisites are stricter than YOLO26: Python 3.12+, PyTorch 2.7+,
+> and a CUDA-compatible GPU with CUDA 12.6+.
 
 ### GPU acceleration
 
@@ -110,7 +116,7 @@ To check whether an existing install can see your GPU:
 | --- | --- |
 | **Input** | Chooses where frames come from. *Camera mode* takes an OpenCV camera index, a stream URL, or a capture source plus resolution. *File mode* takes a local image or video path and can loop videos. |
 | **Object Detection** | Runs an Ultralytics **YOLO26** detection model. Lets you pick the model size, confidence threshold, how often to run inference, and the CPU/GPU device. |
-| **Object Segmentation** | Runs an Ultralytics **YOLO26-seg** instance segmentation model and passes masks, boxes, labels, and confidence scores downstream. |
+| **Object Segmentation** | Runs either an Ultralytics **YOLO26-seg** instance segmentation model or Meta's official **SAM 3** concept segmentation. SAM 3 takes comma-separated noun phrases such as `person, car, bottle` and returns masks, boxes, labels, and confidence scores downstream. |
 | **Object Classification** | Runs an Ultralytics **YOLO26-cls** image classification model and passes the top label and confidence score downstream. |
 | **Class Filter** | Keeps only the object types you list — for example `person, car, dog`. |
 | **OpenCV Preview** | Draws masks, bounding boxes, classification labels, and object labels in a native preview window. |

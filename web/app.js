@@ -70,7 +70,7 @@ const NODE_BLUEPRINTS = {
   },
   segmenter: {
     title: "Object Segmentation",
-    subtitle: "YOLO26 instance masks",
+    subtitle: "YOLO26 or SAM 3 masks",
     x: 620,
     y: 72,
     config: {
@@ -78,6 +78,8 @@ const NODE_BLUEPRINTS = {
       threshold: 0.55,
       intervalMs: 650,
       yoloModel: "yolo26n-seg.pt",
+      samCheckpoint: "",
+      concepts: "person",
       device: "auto",
       imgsz: 640,
       end2end: true,
@@ -229,8 +231,15 @@ function normalizeWorkflow(workflow) {
     if (node.type !== "input") {
       node.subtitle = blueprint.subtitle;
     }
-    if (["detector", "segmenter", "classifier"].includes(node.type)) {
+    if (["detector", "classifier"].includes(node.type)) {
       node.config.engine = "yolo26";
+    }
+    if (node.type === "segmenter" && !["yolo26", "sam3"].includes(node.config.engine)) {
+      node.config.engine = "yolo26";
+    }
+    if (node.type === "segmenter" && node.config.samModel && !node.config.samCheckpoint) {
+      node.config.samCheckpoint = node.config.samModel === "sam3.pt" ? "" : node.config.samModel;
+      delete node.config.samModel;
     }
   }
   return workflow;
@@ -561,25 +570,42 @@ function renderInspector() {
   }
 
   if (node.type === "segmenter") {
-    node.config.engine = "yolo26";
+    els.nodeForm.appendChild(makeSelectField("engine", "Engine", node.config.engine || "yolo26", [
+      ["yolo26", "YOLO26 instance segmentation"],
+      ["sam3", "SAM 3 concept segmentation"],
+    ], (value) => {
+      node.config.engine = value;
+      renderInspector();
+    }));
     els.nodeForm.appendChild(makeRangeField("threshold", "Confidence", node.config.threshold, 0.1, 0.95, 0.05, (value) => {
       node.config.threshold = value;
     }));
     els.nodeForm.appendChild(makeNumberField("intervalMs", "Inference interval ms", node.config.intervalMs, 150, 3000, (value) => {
       node.config.intervalMs = value;
     }));
-    els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 segmentation model", node.config.yoloModel || "yolo26n-seg.pt", SEGMENTATION_MODEL_OPTIONS, (value) => {
-      node.config.yoloModel = value;
-    }));
+    if ((node.config.engine || "yolo26") === "sam3") {
+      els.nodeForm.appendChild(makeTextField("samCheckpoint", "SAM 3 checkpoint path", node.config.samCheckpoint || "", (value) => {
+        node.config.samCheckpoint = value;
+      }));
+      els.nodeForm.appendChild(makeTextAreaField("concepts", "Concept prompts", node.config.concepts || "person", (value) => {
+        node.config.concepts = value;
+      }));
+    } else {
+      els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 segmentation model", node.config.yoloModel || "yolo26n-seg.pt", SEGMENTATION_MODEL_OPTIONS, (value) => {
+        node.config.yoloModel = value;
+      }));
+    }
     els.nodeForm.appendChild(makeSelectField("device", "Device", node.config.device || "auto", runtimeDeviceOptions(), (value) => {
       node.config.device = value;
     }));
     els.nodeForm.appendChild(makeNumberField("imgsz", "Image size", node.config.imgsz || 640, 320, 1280, (value) => {
       node.config.imgsz = value;
     }));
-    els.nodeForm.appendChild(makeToggleField("end2end", "End-to-end head", node.config.end2end ?? true, (checked) => {
-      node.config.end2end = checked;
-    }));
+    if ((node.config.engine || "yolo26") === "yolo26") {
+      els.nodeForm.appendChild(makeToggleField("end2end", "End-to-end head", node.config.end2end ?? true, (checked) => {
+        node.config.end2end = checked;
+      }));
+    }
   }
 
   if (node.type === "classifier") {
