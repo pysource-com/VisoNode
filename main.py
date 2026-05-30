@@ -495,6 +495,7 @@ class OpenCVInputSource:
         self.image = None
         self.loop = bool(config.get("loop", True))
         self.label = "input"
+        self.target_fps = 0.0
 
     def open(self) -> tuple[str, int, int]:
         source_type = str(self.config.get("sourceType", "camera") or "camera").lower()
@@ -510,6 +511,7 @@ class OpenCVInputSource:
             self.capture = self.cv2.VideoCapture(str(path))
             if not self.capture.isOpened():
                 raise RuntimeError(f"Unable to open video file: {path}")
+            self.target_fps = float(self.capture.get(self.cv2.CAP_PROP_FPS) or 0.0)
             return f"video file {path}", self.width, self.height
 
         source = normalize_camera_source(
@@ -642,6 +644,11 @@ class WorkflowRunner:
         self._lock = Lock()
         self._stop_event = Event()
         self._thread: Thread | None = None
+        self._window_name = "No-Code AI Vision"
+        self._display_lock = Lock()
+        self._display_frame = None
+        self._display_want_window = False
+        self._gui_stop = Event()
         self._status = {
             "running": False,
             "state": "idle",
@@ -699,7 +706,6 @@ class WorkflowRunner:
         import cv2
 
         input_source = None
-        window_name = "No-Code AI Vision"
         last_fps_at = time.monotonic()
         frame_count = 0
         last_alert_at = 0.0
@@ -732,51 +738,56 @@ class WorkflowRunner:
             self._add_event("Workflow running", "Python is loading, processing, and displaying frames with OpenCV.")
             self._add_terminal("Workflow running")
 
+            # Detection is throttled to the configured interval, but every frame is
+            # displayed and paced to the source's natural frame rate, so video plays
+            # smoothly with the most recent detections drawn on intervening frames.
+            target_fps = getattr(input_source, "target_fps", 0.0)
+            frame_period = (1.0 / target_fps) if target_fps and target_fps > 1 else 0.0
+            last_infer_at = -1.0
+
             while not self._stop_event.is_set():
                 loop_started_at = time.monotonic()
                 ok, frame = input_source.read()
                 if not ok:
                     raise RuntimeError("Input frame could not be read.")
 
-                frame_detections = detections if input_source.is_static else []
-                frame_filtered = filtered if input_source.is_static else []
+                now = time.monotonic()
                 detector = active_detector_node(workflow)
-                interval = 0.0
                 if detector:
-                    interval = max(0.05, float(detector.get("config", {}).get("intervalMs", 450)) / 1000)
-                    detections = detect_yolo26_frame(frame, detector)
-                    threshold = float(detector.get("config", {}).get("threshold", 0.55))
-                    detections = [item for item in detections if float(item.get("score", 0)) >= threshold]
-                    filtered = filter_detections(workflow, detections)
+                    interval = max(0.0, float(detector.get("config", {}).get("intervalMs", 450)) / 1000)
+                    if last_infer_at < 0 or (now - last_infer_at) >= interval:
+                        last_infer_at = now
+                        detections = detect_yolo26_frame(frame, detector)
+                        threshold = float(detector.get("config", {}).get("threshold", 0.55))
+                        detections = [item for item in detections if float(item.get("score", 0)) >= threshold]
+                        filtered = filter_detections(workflow, detections)
+                        if detections and now - last_terminal_detection_at >= 1:
+                            last_terminal_detection_at = now
+                            labels = ", ".join(
+                                f"{item.get('class', 'object')}:{float(item.get('score', 0)):.2f}"
+                                for item in detections[:6]
+                            )
+                            if len(detections) > 6:
+                                labels = f"{labels}, +{len(detections) - 6} more"
+                            self._add_terminal(f"Detected {len(detections)} object(s): {labels}")
                     frame_detections = detections
                     frame_filtered = filtered
-
-                    now = time.monotonic()
-                    if detections and now - last_terminal_detection_at >= 1:
-                        last_terminal_detection_at = now
-                        labels = ", ".join(
-                            f"{item.get('class', 'object')}:{float(item.get('score', 0)):.2f}"
-                            for item in detections[:6]
-                        )
-                        if len(detections) > 6:
-                            labels = f"{labels}, +{len(detections) - 6} more"
-                        self._add_terminal(f"Detected {len(detections)} object(s): {labels}")
                 else:
-                    now = time.monotonic()
+                    detections = []
+                    filtered = []
+                    frame_detections = []
+                    frame_filtered = []
 
                 preview = enabled_node(workflow, "preview")
                 display_frame = frame.copy()
                 preview_detections = detections_for_node(workflow, "preview", frame_detections, frame_filtered)
-                preview_shown = False
                 if preview and has_active_path(workflow, source_node_id(workflow), "preview"):
                     draw_detections(display_frame, preview_detections, preview)
-                    cv2.imshow(window_name, display_frame)
-                    preview_shown = True
-                    key = cv2.waitKey(1) & 0xFF
-                    if key in (27, ord("q")):
-                        self._stop_event.set()
+                    # Hand the annotated frame to the main thread, which owns the OpenCV
+                    # window (macOS requires HighGUI calls to run on the main thread).
+                    self._publish_frame(display_frame)
                 else:
-                    cv2.waitKey(1)
+                    self._publish_frame(None)
 
                 alert_detections = detections_for_node(workflow, "alert", frame_detections, frame_filtered)
                 alert_node = enabled_node(workflow, "alert")
@@ -803,24 +814,16 @@ class WorkflowRunner:
                     frame_count = 0
                     last_fps_at = now
 
-                if detector and interval > 0 and not self._stop_event.is_set():
-                    remaining = interval - (time.monotonic() - loop_started_at)
-                    if remaining > 0:
-                        if preview_shown:
-                            deadline = time.monotonic() + remaining
-                            while not self._stop_event.is_set():
-                                remaining_ms = int((deadline - time.monotonic()) * 1000)
-                                if remaining_ms <= 1:
-                                    break
-                                wait_ms = min(50, remaining_ms)
-                                key = cv2.waitKey(wait_ms) & 0xFF
-                                if key in (27, ord("q")):
-                                    self._stop_event.set()
-                                    break
-                                if time.monotonic() >= deadline:
-                                    break
-                        else:
-                            self._stop_event.wait(remaining)
+                # Pace playback: files to their natural fps, static images gently;
+                # cameras self-pace because read() blocks at the device rate.
+                if input_source.is_static:
+                    pace = 0.1
+                elif frame_period > 0:
+                    pace = frame_period - (time.monotonic() - loop_started_at)
+                else:
+                    pace = 0.0
+                if pace > 0 and not self._stop_event.is_set():
+                    self._stop_event.wait(pace)
         except Exception as exc:
             self._set_status(running=False, state="error", error=str(exc))
             self._add_event("Workflow error", str(exc))
@@ -828,7 +831,7 @@ class WorkflowRunner:
         finally:
             if input_source is not None:
                 input_source.release()
-            cv2.destroyAllWindows()
+            self._clear_display()
             if self._stop_event.is_set():
                 self._set_status(running=False, state="stopped", fps=0, objectCount=0)
                 self._add_event("Workflow stopped", "Python runtime stopped and released the input source.")
@@ -850,6 +853,50 @@ class WorkflowRunner:
 
     def _add_terminal(self, line: str) -> None:
         terminal_log(line)
+
+    def _publish_frame(self, frame) -> None:
+        """Store the latest annotated frame for the main-thread GUI loop to show."""
+        with self._display_lock:
+            self._display_frame = frame
+            self._display_want_window = frame is not None
+
+    def _clear_display(self) -> None:
+        with self._display_lock:
+            self._display_frame = None
+            self._display_want_window = False
+
+    def run_display_loop(self) -> None:
+        """Render the OpenCV preview window on the calling (main) thread.
+
+        macOS requires every HighGUI call (imshow/waitKey/namedWindow) to run on
+        the main thread, so the worker thread only produces annotated frames and
+        this loop displays them. Blocks until shutdown() is called.
+        """
+        import cv2
+
+        window_open = False
+        while not self._gui_stop.is_set():
+            with self._display_lock:
+                frame = self._display_frame
+                want_window = self._display_want_window
+            if want_window and frame is not None:
+                cv2.imshow(self._window_name, frame)
+                window_open = True
+                key = cv2.waitKey(15) & 0xFF
+                if key in (27, ord("q")):
+                    self.stop()
+            else:
+                if window_open:
+                    cv2.destroyWindow(self._window_name)
+                    cv2.waitKey(1)
+                    window_open = False
+                self._gui_stop.wait(0.03)
+        if window_open:
+            cv2.destroyAllWindows()
+
+    def shutdown(self) -> None:
+        """Signal run_display_loop to exit (called on app shutdown)."""
+        self._gui_stop.set()
 
 
 runner = WorkflowRunner()
@@ -929,10 +976,18 @@ def main() -> None:
     terminal_log(f"No-code vision builder running at http://{args.host}:{args.port}")
     terminal_log("The browser edits the workflow; Python owns capture, inference, and OpenCV display.")
     terminal_log("Press Ctrl+C to stop.")
+    # Run the HTTP server on a background thread so the OpenCV preview window can
+    # own the main thread (required by macOS HighGUI; harmless on Windows/Linux).
+    server_thread = Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
     try:
-        server.serve_forever()
+        runner.run_display_loop()
+    except KeyboardInterrupt:
+        pass
     finally:
+        runner.shutdown()
         runner.stop()
+        server.shutdown()
 
 
 if __name__ == "__main__":
