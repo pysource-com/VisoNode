@@ -4,9 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="01b32564-2e7d-419f-956e-bde8ddd43dd5" name="Changes" comment="Changed Name to visonode">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    <list default="true" id="01b32564-2e7d-419f-956e-bde8ddd43dd5" name="Changes" comment="added sam3">
       <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/web/app.js" beforeDir="false" afterPath="$PROJECT_DIR$/web/app.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/web/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/web/index.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/web/styles.css" beforeDir="false" afterPath="$PROJECT_DIR$/web/styles.css" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -19,7 +22,7 @@
     </persistenceIdMap>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="22" />
+    <option name="cachedIndexableFilesCount" value="25" />
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -231,7 +234,47 @@
       <option name="project" value="LOCAL" />
       <updated>1780134232089</updated>
     </task>
-    <option name="localTasksCounter" value="16" />
+    <task id="LOCAL-00016" summary="improved readme">
+      <option name="closed" value="true" />
+      <created>1780137442419</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1780137442419</updated>
+    </task>
+    <task id="LOCAL-00017" summary="improved readme">
+      <option name="closed" value="true" />
+      <created>1780137569721</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1780137569721</updated>
+    </task>
+    <task id="LOCAL-00018" summary="added object segmentation">
+      <option name="closed" value="true" />
+      <created>1780138602086</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1780138602086</updated>
+    </task>
+    <task id="LOCAL-00019" summary="added object segmentation">
+      <option name="closed" value="true" />
+      <created>1780138826537</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1780138826537</updated>
+    </task>
+    <task id="LOCAL-00020" summary="added sam3">
+      <option name="closed" value="true" />
+      <created>1780142014686</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1780142014686</updated>
+    </task>
+    <option name="localTasksCounter" value="21" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -260,7 +303,10 @@
     <MESSAGE value="Improved workflow, wait for detection before dsplaying" />
     <MESSAGE value="Addded AGPL license" />
     <MESSAGE value="Changed Name to visonode" />
-    <option name="LAST_COMMIT_MESSAGE" value="Changed Name to visonode" />
+    <MESSAGE value="improved readme" />
+    <MESSAGE value="added object segmentation" />
+    <MESSAGE value="added sam3" />
+    <option name="LAST_COMMIT_MESSAGE" value="added sam3" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>
