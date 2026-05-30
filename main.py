@@ -14,10 +14,13 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-YOLO26_MODELS = ("yolo26n.pt", "yolo26s.pt", "yolo26m.pt", "yolo26l.pt", "yolo26x.pt")
+YOLO26_DETECTION_MODELS = ("yolo26n.pt", "yolo26s.pt", "yolo26m.pt", "yolo26l.pt", "yolo26x.pt")
+YOLO26_SEGMENTATION_MODELS = ("yolo26n-seg.pt", "yolo26s-seg.pt", "yolo26m-seg.pt", "yolo26l-seg.pt", "yolo26x-seg.pt")
+YOLO26_MODELS = (*YOLO26_DETECTION_MODELS, *YOLO26_SEGMENTATION_MODELS)
 YOLO26_MODEL_SET = set(YOLO26_MODELS)
 INPUT_NODE_ID = "input"
 LEGACY_CAMERA_NODE_ID = "camera"
+INFERENCE_NODE_IDS = ("detector", "segmenter")
 IMAGE_EXTENSIONS = {".bmp", ".dib", ".jpg", ".jpeg", ".jpe", ".jp2", ".png", ".webp", ".pbm", ".pgm", ".ppm", ".pxm", ".pnm", ".tif", ".tiff"}
 MAX_EVENTS = 32
 MAX_TERMINAL_LINES = 500
@@ -368,11 +371,39 @@ def active_detector_node(workflow: dict) -> dict | None:
     return None
 
 
+def active_segmenter_node(workflow: dict) -> dict | None:
+    segmenter = enabled_node(workflow, "segmenter")
+    input_id = source_node_id(workflow)
+    if segmenter and has_active_path(workflow, input_id, "segmenter"):
+        return segmenter
+    return None
+
+
+def active_inference_nodes(workflow: dict) -> list[dict]:
+    nodes = []
+    input_id = source_node_id(workflow)
+    for node_id in INFERENCE_NODE_IDS:
+        node = enabled_node(workflow, node_id)
+        if node and has_active_path(workflow, input_id, node_id):
+            nodes.append(node)
+    return nodes
+
+
 def active_filter_node(workflow: dict) -> dict | None:
     filter_node = enabled_node(workflow, "filter")
-    if filter_node and active_detector_node(workflow) and has_active_path(workflow, "detector", "filter"):
+    if filter_node and any(
+        has_active_path(workflow, node.get("id"), "filter")
+        for node in active_inference_nodes(workflow)
+    ):
         return filter_node
     return None
+
+
+def inference_results_for_node(workflow: dict, node_id: str, detections: list[dict]) -> list[dict]:
+    return [
+        detection for detection in detections
+        if has_active_path(workflow, detection.get("sourceNodeId", "detector"), node_id)
+    ]
 
 
 def detections_for_node(workflow: dict, node_id: str, detections: list[dict], filtered: list[dict]) -> list[dict]:
@@ -381,13 +412,12 @@ def detections_for_node(workflow: dict, node_id: str, detections: list[dict], fi
     if not node or not has_active_path(workflow, input_id, node_id):
         return []
     if node_id == "preview" and not bool(node.get("config", {}).get("useFilter", False)):
-        if active_detector_node(workflow) and has_active_path(workflow, "detector", node_id):
-            return detections
+        direct_detections = inference_results_for_node(workflow, node_id, detections)
+        if direct_detections:
+            return direct_detections
     if active_filter_node(workflow) and has_active_path(workflow, "filter", node_id):
         return filtered
-    if active_detector_node(workflow) and has_active_path(workflow, "detector", node_id):
-        return detections
-    return []
+    return inference_results_for_node(workflow, node_id, detections)
 
 
 def normalize_camera_source(value) -> int | str:
@@ -483,8 +513,9 @@ class OpenCVInputSource:
             self.capture.release()
 
 
-def detect_yolo26_frame(frame, detector: dict) -> list[dict]:
-    config = detector.get("config", {})
+def run_yolo26_frame(frame, inference_node: dict) -> list[dict]:
+    config = inference_node.get("config", {})
+    source_node_id = inference_node.get("id", "detector")
     model_name = config.get("yoloModel") or "yolo26n.pt"
     threshold = float(config.get("threshold", 0.55))
     imgsz = int(config.get("imgsz", 640))
@@ -513,15 +544,25 @@ def detect_yolo26_frame(frame, detector: dict) -> list[dict]:
         boxes = result.boxes.xyxy.cpu().tolist()
         scores = result.boxes.conf.cpu().tolist()
         classes = result.boxes.cls.cpu().tolist()
-        for box, score, class_id in zip(boxes, scores, classes):
+        masks = []
+        if getattr(result, "masks", None) is not None and result.masks is not None:
+            masks = getattr(result.masks, "xy", None)
+            if masks is None:
+                masks = []
+        for index, (box, score, class_id) in enumerate(zip(boxes, scores, classes)):
             x1, y1, x2, y2 = box
-            detections.append(
-                {
-                    "class": names.get(int(class_id), str(int(class_id))),
-                    "score": float(score),
-                    "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
-                }
-            )
+            detection = {
+                "class": names.get(int(class_id), str(int(class_id))),
+                "score": float(score),
+                "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
+                "sourceNodeId": source_node_id,
+                "kind": "segmentation" if source_node_id == "segmenter" else "detection",
+            }
+            if index < len(masks):
+                polygon = masks[index]
+                if len(polygon):
+                    detection["mask"] = [[float(point[0]), float(point[1])] for point in polygon]
+            detections.append(detection)
     return detections
 
 
@@ -542,18 +583,43 @@ def filter_detections(workflow: dict, detections: list[dict]) -> list[dict]:
     return filtered if len(filtered) >= int(config.get("minCount", 1)) else []
 
 
+def detection_color(label: str) -> tuple[int, int, int]:
+    palette = (
+        (41, 211, 145),
+        (56, 189, 248),
+        (168, 85, 247),
+        (245, 158, 11),
+        (239, 68, 68),
+        (99, 102, 241),
+    )
+    index = sum(label.encode("utf-8")) % len(palette)
+    return palette[index]
+
+
 def draw_detections(frame, detections: list[dict], preview: dict) -> None:
     import cv2
+    import numpy as np
 
     config = preview.get("config", {})
     show_boxes = bool(config.get("showBoxes", True))
     show_labels = bool(config.get("showLabels", True))
+    show_masks = bool(config.get("showMasks", True))
+    mask_opacity = min(0.85, max(0.05, float(config.get("maskOpacity", 0.35))))
     for detection in detections:
         x, y, width, height = [int(round(value)) for value in detection.get("bbox", [0, 0, 0, 0])]
+        label_text = detection.get("class", "object")
+        color = detection_color(label_text)
+        mask = detection.get("mask")
+        if show_masks and mask:
+            points = np.array(mask, dtype=np.int32).reshape((-1, 1, 2))
+            overlay = frame.copy()
+            cv2.fillPoly(overlay, [points], color)
+            cv2.addWeighted(overlay, mask_opacity, frame, 1 - mask_opacity, 0, dst=frame)
+            cv2.polylines(frame, [points], True, color, 2)
         if show_boxes:
-            cv2.rectangle(frame, (x, y), (x + width, y + height), (41, 211, 145), 2)
+            cv2.rectangle(frame, (x, y), (x + width, y + height), color, 2)
         if show_labels:
-            label = f"{detection.get('class', 'object')} {round(float(detection.get('score', 0)) * 100)}%"
+            label = f"{label_text} {round(float(detection.get('score', 0)) * 100)}%"
             text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
             label_y = max(0, y - text_size[1] - 8)
             cv2.rectangle(frame, (x, label_y), (x + text_size[0] + 10, label_y + text_size[1] + 8), (8, 18, 27), -1)
@@ -635,21 +701,28 @@ class WorkflowRunner:
             source_label, actual_width, actual_height = input_source.open()
             self._add_terminal(f"Opened {source_label} ({actual_width}x{actual_height})")
 
-            detector = active_detector_node(workflow)
-            if detector:
-                engine = detector.get("config", {}).get("engine", "yolo26")
-                if engine != "yolo26":
-                    raise RuntimeError("Backend runtime supports Ultralytics YOLO26 only.")
-                model_name = detector.get("config", {}).get("yoloModel") or "yolo26n.pt"
-                device, device_label = resolve_inference_device(detector.get("config", {}))
-                self._add_terminal(f"Loading detector model {model_name}")
-                self._add_terminal(f"Using inference device {device_label}")
-                load_yolo_model(model_name, device)
-                self._set_status(state="running", model=model_name, device=device_label)
-                self._add_terminal(f"Loaded detector model {model_name}")
+            inference_nodes = active_inference_nodes(workflow)
+            if inference_nodes:
+                loaded_models = []
+                device_labels = []
+                for inference_node in inference_nodes:
+                    engine = inference_node.get("config", {}).get("engine", "yolo26")
+                    if engine != "yolo26":
+                        raise RuntimeError("Backend runtime supports Ultralytics YOLO26 only.")
+                    model_name = inference_node.get("config", {}).get("yoloModel") or "yolo26n.pt"
+                    device, device_label = resolve_inference_device(inference_node.get("config", {}))
+                    task_label = "segmentation" if inference_node.get("id") == "segmenter" else "detector"
+                    self._add_terminal(f"Loading {task_label} model {model_name}")
+                    self._add_terminal(f"Using inference device {device_label}")
+                    load_yolo_model(model_name, device)
+                    loaded_models.append(model_name)
+                    device_labels.append(device_label)
+                    self._add_terminal(f"Loaded {task_label} model {model_name}")
+                device_status = device_labels[0] if len(set(device_labels)) == 1 else "Mixed devices"
+                self._set_status(state="running", model=", ".join(loaded_models), device=device_status)
             else:
                 self._set_status(state="running")
-                self._add_terminal("No detector node is active; streaming input frames only")
+                self._add_terminal("No inference node is active; streaming input frames only")
 
             self._add_event("Workflow running", "Python is loading, processing, and displaying frames with OpenCV.")
             self._add_terminal("Workflow running")
@@ -662,14 +735,27 @@ class WorkflowRunner:
 
                 frame_detections = detections if input_source.is_static else []
                 frame_filtered = filtered if input_source.is_static else []
-                detector = active_detector_node(workflow)
+                inference_nodes = active_inference_nodes(workflow)
                 interval = 0.0
-                if detector:
-                    interval = max(0.05, float(detector.get("config", {}).get("intervalMs", 450)) / 1000)
-                    detections = detect_yolo26_frame(frame, detector)
-                    threshold = float(detector.get("config", {}).get("threshold", 0.55))
-                    detections = [item for item in detections if float(item.get("score", 0)) >= threshold]
-                    filtered = filter_detections(workflow, detections)
+                if inference_nodes:
+                    intervals = []
+                    detections = []
+                    for inference_node in inference_nodes:
+                        config = inference_node.get("config", {})
+                        intervals.append(max(0.05, float(config.get("intervalMs", 450)) / 1000))
+                        threshold = float(config.get("threshold", 0.55))
+                        node_detections = run_yolo26_frame(frame, inference_node)
+                        detections.extend(
+                            item for item in node_detections
+                            if float(item.get("score", 0)) >= threshold
+                        )
+                    interval = min(intervals)
+                    filter_candidates = (
+                        inference_results_for_node(workflow, "filter", detections)
+                        if active_filter_node(workflow)
+                        else detections
+                    )
+                    filtered = filter_detections(workflow, filter_candidates)
                     frame_detections = detections
                     frame_filtered = filtered
 
@@ -725,7 +811,7 @@ class WorkflowRunner:
                     frame_count = 0
                     last_fps_at = now
 
-                if detector and interval > 0 and not self._stop_event.is_set():
+                if inference_nodes and interval > 0 and not self._stop_event.is_set():
                     remaining = interval - (time.monotonic() - loop_started_at)
                     if remaining > 0:
                         if preview_shown:
@@ -785,7 +871,11 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/yolo26/models":
-            json_response(self, 200, {"models": list(YOLO26_MODELS)})
+            json_response(self, 200, {
+                "models": list(YOLO26_MODELS),
+                "detectionModels": list(YOLO26_DETECTION_MODELS),
+                "segmentationModels": list(YOLO26_SEGMENTATION_MODELS),
+            })
             return
         if path == "/api/workflow/status":
             json_response(self, 200, runner.status())

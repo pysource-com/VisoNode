@@ -4,7 +4,7 @@
 
 ### Build computer vision workflows without writing any code.
 
-Connect a camera or video to an AI object-detection model and watch the results live —
+Connect a camera or video to an AI detection or segmentation model and watch the results live —
 all by dragging and linking boxes in your browser. No machine learning experience required.
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
@@ -46,7 +46,7 @@ Press **Stop**, `q`, or `Esc` to stop.
 
 - **No code.** Build the whole pipeline by connecting nodes in the browser.
 - **100% local.** Your camera and video never leave your computer — nothing is sent to the cloud.
-- **State-of-the-art detection.** Powered by Ultralytics **YOLO26**.
+- **State-of-the-art detection and segmentation.** Powered by Ultralytics **YOLO26**.
 - **CPU or GPU.** Works on any machine; uses your NVIDIA GPU automatically when available.
 - **Live feedback.** See frame rate, object count, and the active device in real time.
 - **Flexible inputs.** Webcams, stream URLs, capture devices, or local image/video files.
@@ -54,12 +54,11 @@ Press **Stop**, `q`, or `Esc` to stop.
 A workflow is just a chain of nodes:
 
 ```text
-Input  →  Object Detection  →  Class Filter  →  OpenCV Preview  →  Alert Output
+Input  →  Object Detection or Object Segmentation  →  Class Filter  →  OpenCV Preview  →  Alert Output
 ```
 
-Each node does one job: read frames, find objects, keep only the classes you care about,
-draw the results, and log alerts. The detection results appear in a separate window, with
-boxes and labels drawn over the video:
+Each node does one job: read frames, find objects, segment object masks, keep only the classes you care about,
+draw the results, and log alerts. The results appear in a separate window, with boxes, labels, and masks drawn over the video:
 
 ![Object detection output with bounding boxes over a street scene](docs/detection-output.png)
 
@@ -110,9 +109,10 @@ To check whether an existing install can see your GPU:
 | Node | What it does |
 | --- | --- |
 | **Input** | Chooses where frames come from. *Camera mode* takes an OpenCV camera index, a stream URL, or a capture source plus resolution. *File mode* takes a local image or video path and can loop videos. |
-| **Object Detection** | Runs an Ultralytics **YOLO26** model. Lets you pick the model size, confidence threshold, how often to run inference, and the CPU/GPU device. |
+| **Object Detection** | Runs an Ultralytics **YOLO26** detection model. Lets you pick the model size, confidence threshold, how often to run inference, and the CPU/GPU device. |
+| **Object Segmentation** | Runs an Ultralytics **YOLO26-seg** instance segmentation model and passes masks, boxes, labels, and confidence scores downstream. |
 | **Class Filter** | Keeps only the object types you list — for example `person, car, dog`. |
-| **OpenCV Preview** | Draws the bounding boxes and labels in a native preview window. |
+| **OpenCV Preview** | Draws masks, bounding boxes, and labels in a native preview window. |
 | **Alert Output** | Logs detection events on the backend, with a cooldown so you aren't flooded. |
 
 ### Choosing CPU or GPU

@@ -7,10 +7,27 @@ const INPUT_NODE_ID = "input";
 const NODE_ICONS = {
   input: "file-input",
   detector: "scan-search",
+  segmenter: "scissors",
   filter: "filter",
   preview: "monitor-play",
   alert: "bell-ring",
 };
+
+const DETECTION_MODEL_OPTIONS = [
+  ["yolo26n.pt", "YOLO26 nano"],
+  ["yolo26s.pt", "YOLO26 small"],
+  ["yolo26m.pt", "YOLO26 medium"],
+  ["yolo26l.pt", "YOLO26 large"],
+  ["yolo26x.pt", "YOLO26 extra large"],
+];
+
+const SEGMENTATION_MODEL_OPTIONS = [
+  ["yolo26n-seg.pt", "YOLO26 nano segmentation"],
+  ["yolo26s-seg.pt", "YOLO26 small segmentation"],
+  ["yolo26m-seg.pt", "YOLO26 medium segmentation"],
+  ["yolo26l-seg.pt", "YOLO26 large segmentation"],
+  ["yolo26x-seg.pt", "YOLO26 extra large segmentation"],
+];
 
 const NODE_BLUEPRINTS = {
   input: {
@@ -42,6 +59,21 @@ const NODE_BLUEPRINTS = {
       end2end: true,
     },
   },
+  segmenter: {
+    title: "Object Segmentation",
+    subtitle: "YOLO26 instance masks",
+    x: 620,
+    y: 72,
+    config: {
+      engine: "yolo26",
+      threshold: 0.55,
+      intervalMs: 650,
+      yoloModel: "yolo26n-seg.pt",
+      device: "auto",
+      imgsz: 640,
+      end2end: true,
+    },
+  },
   filter: {
     title: "Class Filter",
     subtitle: "Only pass selected labels",
@@ -60,6 +92,8 @@ const NODE_BLUEPRINTS = {
     config: {
       showBoxes: true,
       showLabels: true,
+      showMasks: true,
+      maskOpacity: 0.35,
       useFilter: false,
     },
   },
@@ -172,7 +206,7 @@ function normalizeWorkflow(workflow) {
     if (node.type !== "input") {
       node.subtitle = blueprint.subtitle;
     }
-    if (node.type === "detector") {
+    if (node.type === "detector" || node.type === "segmenter") {
       node.config.engine = "yolo26";
     }
   }
@@ -489,13 +523,29 @@ function renderInspector() {
     els.nodeForm.appendChild(makeNumberField("intervalMs", "Inference interval ms", node.config.intervalMs, 150, 2000, (value) => {
       node.config.intervalMs = value;
     }));
-    els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 model", node.config.yoloModel || "yolo26n.pt", [
-      ["yolo26n.pt", "YOLO26 nano"],
-      ["yolo26s.pt", "YOLO26 small"],
-      ["yolo26m.pt", "YOLO26 medium"],
-      ["yolo26l.pt", "YOLO26 large"],
-      ["yolo26x.pt", "YOLO26 extra large"],
-    ], (value) => {
+    els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 model", node.config.yoloModel || "yolo26n.pt", DETECTION_MODEL_OPTIONS, (value) => {
+      node.config.yoloModel = value;
+    }));
+    els.nodeForm.appendChild(makeSelectField("device", "Device", node.config.device || "auto", runtimeDeviceOptions(), (value) => {
+      node.config.device = value;
+    }));
+    els.nodeForm.appendChild(makeNumberField("imgsz", "Image size", node.config.imgsz || 640, 320, 1280, (value) => {
+      node.config.imgsz = value;
+    }));
+    els.nodeForm.appendChild(makeToggleField("end2end", "End-to-end head", node.config.end2end ?? true, (checked) => {
+      node.config.end2end = checked;
+    }));
+  }
+
+  if (node.type === "segmenter") {
+    node.config.engine = "yolo26";
+    els.nodeForm.appendChild(makeRangeField("threshold", "Confidence", node.config.threshold, 0.1, 0.95, 0.05, (value) => {
+      node.config.threshold = value;
+    }));
+    els.nodeForm.appendChild(makeNumberField("intervalMs", "Inference interval ms", node.config.intervalMs, 150, 3000, (value) => {
+      node.config.intervalMs = value;
+    }));
+    els.nodeForm.appendChild(makeSelectField("yoloModel", "YOLO26 segmentation model", node.config.yoloModel || "yolo26n-seg.pt", SEGMENTATION_MODEL_OPTIONS, (value) => {
       node.config.yoloModel = value;
     }));
     els.nodeForm.appendChild(makeSelectField("device", "Device", node.config.device || "auto", runtimeDeviceOptions(), (value) => {
@@ -519,6 +569,12 @@ function renderInspector() {
   }
 
   if (node.type === "preview") {
+    els.nodeForm.appendChild(makeToggleField("showMasks", "Show masks", node.config.showMasks ?? true, (checked) => {
+      node.config.showMasks = checked;
+    }));
+    els.nodeForm.appendChild(makeRangeField("maskOpacity", "Mask opacity", node.config.maskOpacity ?? 0.35, 0.1, 0.8, 0.05, (value) => {
+      node.config.maskOpacity = value;
+    }));
     els.nodeForm.appendChild(makeToggleField("showBoxes", "Show boxes", node.config.showBoxes, (checked) => {
       node.config.showBoxes = checked;
     }));
@@ -746,7 +802,7 @@ async function fetchRuntimeDevices() {
     const response = await fetch("/api/runtime/devices", { cache: "no-store" });
     if (!response.ok) return;
     state.runtimeDevices = await response.json();
-    if (selectedNode()?.type === "detector") renderInspector();
+    if (["detector", "segmenter"].includes(selectedNode()?.type)) renderInspector();
   } catch (error) {
     console.warn(error);
   }
