@@ -5,7 +5,7 @@
 ### Build computer vision workflows without writing any code.
 
 Connect a camera or video to an AI detection, segmentation, or classification model and watch the results live —
-all by dragging and linking boxes in your browser. No machine learning experience required.
+all by dragging and linking boxes in a native desktop app. No machine learning experience required.
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Python](https://img.shields.io/badge/python-3.13-blue?logo=python&logoColor=white)
@@ -27,15 +27,17 @@ all by dragging and linking boxes in your browser. No machine learning experienc
 # 1. Install dependencies (CPU build — works on any computer)
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# 2. Start the app
-.\.venv\Scripts\python.exe main.py
-
-# 3. Open the editor in your browser
-#    http://127.0.0.1:8000
+# 2. Start the desktop app
+.\.venv\Scripts\python.exe app.py
 ```
 
-Configure the nodes, click **Run**, and the detections appear in a live preview window.
-Press **Stop**, `q`, or `Esc` to stop.
+The native **PySide6 desktop window** opens with the node editor. Configure the nodes, click **Run**,
+and the detections appear in a live preview window embedded in the app.
+Press **Stop**, or close the preview window (`q` / `Esc`) to stop.
+
+> The editor is now a native desktop app — there is no browser or local web server involved.
+> Your graph is saved to `workflow.json` next to the app and reloaded on the next launch.
+> The legacy browser editor (`python main.py`, served at `http://127.0.0.1:8000`) still works if you prefer it.
 
 > **Have an NVIDIA GPU?** Run `.\scripts\install-gpu.ps1` instead of step 1 for a big speed-up.
 > See [GPU acceleration](#gpu-acceleration) below.
