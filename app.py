@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import (
+    QMimeData,
     QObject,
     QPointF,
     QRectF,
@@ -26,6 +27,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QDrag,
     QFont,
     QImage,
     QPainter,
@@ -70,6 +72,7 @@ import main as engine
 ROOT = Path(__file__).resolve().parent
 WORKFLOW_FILE = ROOT / "workflow.json"
 INPUT_NODE_ID = core.INPUT_NODE_ID
+NODE_MIME_TYPE = "application/x-visonode-node-type"
 
 NODE_W = 222
 NODE_H = 86
@@ -161,29 +164,29 @@ NODE_BLUEPRINTS = {
 }
 
 # ---- theme ----------------------------------------------------------------
-C_BG = "#f6f7fb"
-C_CANVAS = "#fbfcff"
-C_PANEL = "#ffffff"
-C_CARD = "#f8fafc"
-C_CARD_HOVER = "#fff4f1"
-C_BORDER = "#d9dee8"
-C_BORDER_STRONG = "#aeb7c8"
-C_TEXT = "#252b37"
-C_MUTED = "#747f91"
+C_BG = "#0b1020"
+C_CANVAS = "#0f172a"
+C_PANEL = "#111827"
+C_CARD = "#182235"
+C_CARD_HOVER = "#251c23"
+C_BORDER = "#263244"
+C_BORDER_STRONG = "#4a5872"
+C_TEXT = "#e5e7eb"
+C_MUTED = "#94a3b8"
 C_ACCENT = "#ff6d5a"
-C_ACCENT2 = "#6b78b8"
-C_DANGER = "#d92d20"
+C_ACCENT2 = "#8da2fb"
+C_DANGER = "#f97066"
 C_WARN = "#f79009"
 C_SUCCESS = "#12b76a"
 
 STATUS_COLORS = {
-    "idle": "#98a2b3",
+    "idle": "#64748b",
     "starting": C_ACCENT2,
     "running": C_SUCCESS,
     "error": C_DANGER,
-    "off": "#c5ceda",
+    "off": "#475569",
     "unlinked": C_WARN,
-    "stopped": "#98a2b3",
+    "stopped": "#64748b",
 }
 
 NODE_TYPE_COLORS = {
@@ -204,7 +207,7 @@ QLabel#brandMark {{
     background: transparent; color: {C_ACCENT}; font-weight: 900;
     border: 2px solid {C_ACCENT}; border-radius: 10px; padding: 3px 7px; font-size: 14px;
 }}
-QLabel#brandTitle {{ color: #111827; font-size: 18px; font-weight: 750; }}
+QLabel#brandTitle {{ color: {C_TEXT}; font-size: 18px; font-weight: 750; }}
 QLabel#versionBadge {{
     color: {C_MUTED}; background: {C_CARD}; border: 1px solid {C_BORDER};
     border-radius: 8px; padding: 2px 8px; font-size: 11px;
@@ -223,14 +226,14 @@ QPushButton {{
 QPushButton:hover {{ background: {C_CARD}; border-color: {C_BORDER_STRONG}; }}
 QPushButton#primary {{ background: {C_ACCENT}; color: white; border: none; font-weight: 800; }}
 QPushButton#primary:hover {{ background: #ff826f; }}
-QPushButton#primary:disabled {{ background: #ffd1c8; color: white; }}
+QPushButton#primary:disabled {{ background: #5a2b2c; color: #9f6a66; }}
 QPushButton#danger {{ background: {C_PANEL}; border: 1px solid {C_BORDER}; }}
 QPushButton#danger:hover {{ border-color: {C_DANGER}; color: {C_DANGER}; }}
 QPushButton#palette {{
     text-align: left; padding: 10px 12px; font-weight: 650;
     background: transparent; border-color: transparent; border-radius: 10px;
 }}
-QPushButton#palette:hover {{ background: {C_CARD_HOVER}; border-color: #ffd8d0; color: #c83f2e; }}
+QPushButton#palette:hover {{ background: {C_CARD_HOVER}; border-color: #6b363c; color: #ffad9f; }}
 
 QComboBox, QLineEdit, QSpinBox, QTextEdit, QPlainTextEdit {{
     background: {C_PANEL}; border: 1px solid {C_BORDER}; border-radius: 9px;
@@ -239,14 +242,14 @@ QComboBox, QLineEdit, QSpinBox, QTextEdit, QPlainTextEdit {{
 QComboBox:focus, QLineEdit:focus, QSpinBox:focus, QTextEdit:focus {{ border-color: {C_ACCENT2}; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
 QComboBox QAbstractItemView {{
-    background: {C_PANEL}; border: 1px solid {C_BORDER}; selection-background-color: #eef2ff;
+    background: {C_PANEL}; border: 1px solid {C_BORDER}; selection-background-color: #24304a;
     color: {C_TEXT}; outline: none;
 }}
 QCheckBox {{ spacing: 8px; }}
 QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 6px; border: 1px solid {C_BORDER}; background: {C_PANEL}; }}
 QCheckBox::indicator:checked {{ background: {C_ACCENT}; border-color: {C_ACCENT}; }}
 
-QSlider::groove:horizontal {{ height: 5px; background: #e8ebf2; border-radius: 3px; }}
+QSlider::groove:horizontal {{ height: 5px; background: #253145; border-radius: 3px; }}
 QSlider::sub-page:horizontal {{ background: {C_ACCENT}; border-radius: 3px; }}
 QSlider::handle:horizontal {{ background: {C_PANEL}; border: 1px solid {C_ACCENT}; width: 15px; height: 15px; margin: -6px 0; border-radius: 8px; }}
 
@@ -257,7 +260,7 @@ QListWidget::item {{
 }}
 QScrollArea {{ border: none; background: transparent; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: #cbd3df; border-radius: 5px; min-height: 30px; }}
+QScrollBar::handle:vertical {{ background: #344258; border-radius: 5px; min-height: 30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 QGraphicsView {{ border: 1px solid {C_BORDER}; border-radius: 16px; background: {C_CANVAS}; }}
 
@@ -330,6 +333,50 @@ def save_workflow(workflow: dict) -> None:
         pass
 
 
+# ---- palette drag source --------------------------------------------------
+class PaletteNodeButton(QPushButton):
+    def __init__(self, node_type: str, label: str) -> None:
+        super().__init__(label)
+        self.node_type = node_type
+        self._drag_start = None
+        self.setObjectName("palette")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip("Drag onto the canvas, or click to add/select this node.")
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = event.position().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if not (event.buttons() & Qt.MouseButton.LeftButton) or self._drag_start is None:
+            super().mouseMoveEvent(event)
+            return
+        if (event.position().toPoint() - self._drag_start).manhattanLength() < QApplication.startDragDistance():
+            super().mouseMoveEvent(event)
+            return
+
+        mime = QMimeData()
+        mime.setData(NODE_MIME_TYPE, self.node_type.encode("utf-8"))
+
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        pixmap = QPixmap(self.size())
+        pixmap.fill(Qt.GlobalColor.transparent)
+        self.render(pixmap)
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(event.position().toPoint())
+        drag.exec(Qt.DropAction.CopyAction)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self._drag_start = None
+
+    def mouseReleaseEvent(self, event) -> None:
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self._drag_start = None
+        super().mouseReleaseEvent(event)
+
+
 # ---- graphics: edges & nodes ----------------------------------------------
 class EdgeItem(QGraphicsPathItem):
     def __init__(self, from_id: str, to_id: str) -> None:
@@ -338,7 +385,7 @@ class EdgeItem(QGraphicsPathItem):
         self.to_id = to_id
         self.setZValue(-1)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
-        pen = QPen(QColor("#a0a8b8"), 2.4)
+        pen = QPen(QColor("#5d6b82"), 2.4)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         self.setPen(pen)
 
@@ -351,7 +398,7 @@ class EdgeItem(QGraphicsPathItem):
 
     def paint(self, painter, option, widget=None) -> None:
         selected = self.isSelected()
-        pen = QPen(QColor(C_ACCENT if selected else "#a0a8b8"), 3.2 if selected else 2.4)
+        pen = QPen(QColor(C_ACCENT if selected else "#5d6b82"), 3.2 if selected else 2.4)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         self.setPen(pen)
         super().paint(painter, option, widget)
@@ -425,12 +472,12 @@ class NodeItem(QGraphicsObject):
 
         shadow_path = QPainterPath()
         shadow_path.addRoundedRect(body.translated(0, 4), 13, 13)
-        shadow = QColor(17, 24, 39, 26 if enabled else 12)
+        shadow = QColor(0, 0, 0, 80 if enabled else 45)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.fillPath(shadow_path, QBrush(shadow))
 
         painter.setPen(QPen(QColor(C_ACCENT if selected else C_BORDER), 2.2 if selected else 1.2))
-        painter.setBrush(QBrush(QColor(C_PANEL if enabled else "#f1f4f8")))
+        painter.setBrush(QBrush(QColor(C_CARD if enabled else "#141c2b")))
         painter.drawPath(path)
 
         # n8n-like node type badge.
@@ -438,7 +485,7 @@ class NodeItem(QGraphicsObject):
         icon_path = QPainterPath()
         icon_path.addRoundedRect(icon_box, 12, 12)
         icon_bg = QColor(node_color)
-        icon_bg.setAlpha(28 if enabled else 14)
+        icon_bg.setAlpha(42 if enabled else 20)
         painter.fillPath(icon_path, QBrush(icon_bg))
         painter.setPen(QPen(node_color, 1.4))
         painter.drawPath(icon_path)
@@ -568,6 +615,8 @@ class NodeEditor(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         self.rebuild()
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
@@ -577,8 +626,8 @@ class NodeEditor(QGraphicsView):
         minor_step = 16
         left = int(rect.left()) - (int(rect.left()) % minor_step)
         top = int(rect.top()) - (int(rect.top()) % minor_step)
-        dot = QColor("#d5dbe7")
-        major_dot = QColor("#c4ccdb")
+        dot = QColor("#253044")
+        major_dot = QColor("#334157")
 
         painter.setPen(Qt.PenStyle.NoPen)
         y = top
@@ -652,6 +701,14 @@ class NodeEditor(QGraphicsView):
     def add_node(self, node_type: str, x: float | None = None, y: float | None = None) -> None:
         existing = next((n for n in self.workflow["nodes"] if n["type"] == node_type), None)
         if existing:
+            if x is not None and y is not None:
+                existing["x"] = round(x)
+                existing["y"] = round(y)
+                item = self.node_items.get(existing["id"])
+                if item:
+                    item.setPos(existing["x"], existing["y"])
+                self.update_edges()
+                self.persist()
             self.select_node(existing["id"])
             return
         bp = NODE_BLUEPRINTS[node_type]
@@ -660,6 +717,44 @@ class NodeEditor(QGraphicsView):
         self.rebuild()
         self.select_node(node["id"])
         self.persist()
+
+    def _drop_node_type(self, event) -> str | None:
+        mime = event.mimeData()
+        if not mime.hasFormat(NODE_MIME_TYPE):
+            return None
+        node_type = bytes(mime.data(NODE_MIME_TYPE)).decode("utf-8")
+        return node_type if node_type in NODE_BLUEPRINTS else None
+
+    def _drop_scene_top_left(self, event) -> QPointF:
+        scene_pos = self.mapToScene(event.position().toPoint())
+        scene_rect = self.sceneRect()
+        x = min(max(scene_pos.x() - NODE_W / 2, scene_rect.left()), scene_rect.right() - NODE_W)
+        y = min(max(scene_pos.y() - NODE_H / 2, scene_rect.top()), scene_rect.bottom() - NODE_H)
+        return QPointF(x, y)
+
+    def dragEnterEvent(self, event) -> None:
+        if self._drop_node_type(event):
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if self._drop_node_type(event):
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        node_type = self._drop_node_type(event)
+        if not node_type:
+            super().dropEvent(event)
+            return
+        pos = self._drop_scene_top_left(event)
+        self.add_node(node_type, pos.x(), pos.y())
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
 
     def remove_node(self, node_id: str) -> None:
         self.workflow["nodes"] = [n for n in self.workflow["nodes"] if n["id"] != node_id]
@@ -1202,12 +1297,11 @@ class MainWindow(QMainWindow):
         heading.setObjectName("panelHeading")
         lay.addWidget(heading)
         for node_type, bp in NODE_BLUEPRINTS.items():
-            btn = QPushButton(f"{NODE_ICONS[node_type]}   {bp['title']}")
-            btn.setObjectName("palette")
+            btn = PaletteNodeButton(node_type, f"{NODE_ICONS[node_type]}   {bp['title']}")
             btn.clicked.connect(lambda _, t=node_type: self.editor.add_node(t))
             lay.addWidget(btn)
         lay.addSpacing(6)
-        hint = QLabel("Tip: drag a node's right port onto another node's left port to connect them.")
+        hint = QLabel("Drag nodes onto the canvas. Drag a node's right port onto another node's left port to connect them.")
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {C_MUTED}; font-size: 11px;")
         lay.addWidget(hint)
