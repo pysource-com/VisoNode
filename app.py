@@ -71,9 +71,9 @@ ROOT = Path(__file__).resolve().parent
 WORKFLOW_FILE = ROOT / "workflow.json"
 INPUT_NODE_ID = core.INPUT_NODE_ID
 
-NODE_W = 214
-NODE_H = 92
-PORT_Y = 46
+NODE_W = 222
+NODE_H = 86
+PORT_Y = 43
 PORT_R = 7
 
 NODE_ICONS = {
@@ -161,75 +161,94 @@ NODE_BLUEPRINTS = {
 }
 
 # ---- theme ----------------------------------------------------------------
-C_BG = "#0b1220"
-C_PANEL = "#111a2b"
-C_CARD = "#15203a"
-C_BORDER = "#243049"
-C_TEXT = "#e6edf6"
-C_MUTED = "#8a97ad"
-C_ACCENT = "#29d391"
-C_ACCENT2 = "#38bdf8"
-C_DANGER = "#ef4444"
-C_WARN = "#f59e0b"
+C_BG = "#f6f7fb"
+C_CANVAS = "#fbfcff"
+C_PANEL = "#ffffff"
+C_CARD = "#f8fafc"
+C_CARD_HOVER = "#fff4f1"
+C_BORDER = "#d9dee8"
+C_BORDER_STRONG = "#aeb7c8"
+C_TEXT = "#252b37"
+C_MUTED = "#747f91"
+C_ACCENT = "#ff6d5a"
+C_ACCENT2 = "#6b78b8"
+C_DANGER = "#d92d20"
+C_WARN = "#f79009"
+C_SUCCESS = "#12b76a"
 
 STATUS_COLORS = {
-    "idle": "#5b6b86",
+    "idle": "#98a2b3",
     "starting": C_ACCENT2,
-    "running": C_ACCENT,
+    "running": C_SUCCESS,
     "error": C_DANGER,
-    "off": "#475068",
+    "off": "#c5ceda",
     "unlinked": C_WARN,
-    "stopped": "#5b6b86",
+    "stopped": "#98a2b3",
+}
+
+NODE_TYPE_COLORS = {
+    "input": "#ff6d5a",
+    "detector": "#2e90fa",
+    "segmenter": "#7a5af8",
+    "classifier": "#12b76a",
+    "filter": "#f79009",
+    "preview": "#06aed4",
+    "alert": "#f04438",
 }
 
 STYLESHEET = f"""
-* {{ font-family: "Segoe UI", "Inter", sans-serif; }}
+* {{ font-family: "Segoe UI Variable", "Segoe UI", sans-serif; }}
 QMainWindow, QWidget#root {{ background: {C_BG}; }}
 QWidget {{ color: {C_TEXT}; font-size: 13px; }}
 QLabel#brandMark {{
-    background: {C_ACCENT}; color: #062018; font-weight: 800;
-    border-radius: 9px; padding: 4px 8px; font-size: 14px;
+    background: transparent; color: {C_ACCENT}; font-weight: 900;
+    border: 2px solid {C_ACCENT}; border-radius: 10px; padding: 3px 7px; font-size: 14px;
 }}
-QLabel#brandTitle {{ font-size: 18px; font-weight: 700; }}
+QLabel#brandTitle {{ color: #111827; font-size: 18px; font-weight: 750; }}
 QLabel#versionBadge {{
     color: {C_MUTED}; background: {C_CARD}; border: 1px solid {C_BORDER};
     border-radius: 8px; padding: 2px 8px; font-size: 11px;
 }}
-QLabel#panelHeading {{ color: {C_MUTED}; font-size: 11px; font-weight: 700; letter-spacing: 1px; }}
-QFrame#panel {{ background: {C_PANEL}; border: 1px solid {C_BORDER}; border-radius: 14px; }}
+QLabel#panelHeading {{ color: {C_MUTED}; font-size: 11px; font-weight: 800; letter-spacing: 1px; }}
+QFrame#panel {{ background: {C_PANEL}; border: 1px solid {C_BORDER}; border-radius: 16px; }}
 QFrame#topbar {{ background: {C_PANEL}; border-bottom: 1px solid {C_BORDER}; }}
 QFrame#hsep {{ background: {C_BORDER}; max-height: 1px; min-height: 1px; }}
+QSplitter {{ background: {C_BG}; }}
+QSplitter::handle {{ background: {C_BG}; }}
 
 QPushButton {{
-    background: {C_CARD}; border: 1px solid {C_BORDER}; border-radius: 10px;
-    padding: 8px 14px; color: {C_TEXT};
+    background: {C_PANEL}; border: 1px solid {C_BORDER}; border-radius: 9px;
+    padding: 8px 14px; color: {C_TEXT}; font-weight: 600;
 }}
-QPushButton:hover {{ border-color: {C_ACCENT2}; }}
-QPushButton#primary {{ background: {C_ACCENT}; color: #052016; border: none; font-weight: 700; }}
-QPushButton#primary:hover {{ background: #34e3a1; }}
-QPushButton#primary:disabled {{ background: #1d3a2e; color: #5e7d6e; }}
-QPushButton#danger {{ background: {C_CARD}; border: 1px solid {C_BORDER}; }}
-QPushButton#danger:hover {{ border-color: {C_DANGER}; color: #ffb4ad; }}
-QPushButton#palette {{ text-align: left; padding: 10px 12px; font-weight: 600; }}
-QPushButton#palette:hover {{ background: {C_CARD}; border-color: {C_ACCENT}; }}
+QPushButton:hover {{ background: {C_CARD}; border-color: {C_BORDER_STRONG}; }}
+QPushButton#primary {{ background: {C_ACCENT}; color: white; border: none; font-weight: 800; }}
+QPushButton#primary:hover {{ background: #ff826f; }}
+QPushButton#primary:disabled {{ background: #ffd1c8; color: white; }}
+QPushButton#danger {{ background: {C_PANEL}; border: 1px solid {C_BORDER}; }}
+QPushButton#danger:hover {{ border-color: {C_DANGER}; color: {C_DANGER}; }}
+QPushButton#palette {{
+    text-align: left; padding: 10px 12px; font-weight: 650;
+    background: transparent; border-color: transparent; border-radius: 10px;
+}}
+QPushButton#palette:hover {{ background: {C_CARD_HOVER}; border-color: #ffd8d0; color: #c83f2e; }}
 
 QComboBox, QLineEdit, QSpinBox, QTextEdit, QPlainTextEdit {{
-    background: {C_BG}; border: 1px solid {C_BORDER}; border-radius: 9px;
+    background: {C_PANEL}; border: 1px solid {C_BORDER}; border-radius: 9px;
     padding: 6px 9px; selection-background-color: {C_ACCENT2};
 }}
 QComboBox:focus, QLineEdit:focus, QSpinBox:focus, QTextEdit:focus {{ border-color: {C_ACCENT2}; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
 QComboBox QAbstractItemView {{
-    background: {C_PANEL}; border: 1px solid {C_BORDER}; selection-background-color: {C_ACCENT2};
+    background: {C_PANEL}; border: 1px solid {C_BORDER}; selection-background-color: #eef2ff;
     color: {C_TEXT}; outline: none;
 }}
 QCheckBox {{ spacing: 8px; }}
-QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 6px; border: 1px solid {C_BORDER}; background: {C_BG}; }}
+QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 6px; border: 1px solid {C_BORDER}; background: {C_PANEL}; }}
 QCheckBox::indicator:checked {{ background: {C_ACCENT}; border-color: {C_ACCENT}; }}
 
-QSlider::groove:horizontal {{ height: 5px; background: {C_BORDER}; border-radius: 3px; }}
+QSlider::groove:horizontal {{ height: 5px; background: #e8ebf2; border-radius: 3px; }}
 QSlider::sub-page:horizontal {{ background: {C_ACCENT}; border-radius: 3px; }}
-QSlider::handle:horizontal {{ background: {C_TEXT}; width: 15px; height: 15px; margin: -6px 0; border-radius: 8px; }}
+QSlider::handle:horizontal {{ background: {C_PANEL}; border: 1px solid {C_ACCENT}; width: 15px; height: 15px; margin: -6px 0; border-radius: 8px; }}
 
 QListWidget {{ background: transparent; border: none; }}
 QListWidget::item {{
@@ -238,13 +257,16 @@ QListWidget::item {{
 }}
 QScrollArea {{ border: none; background: transparent; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: {C_BORDER}; border-radius: 5px; min-height: 30px; }}
+QScrollBar::handle:vertical {{ background: #cbd3df; border-radius: 5px; min-height: 30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
-QGraphicsView {{ border: 1px solid {C_BORDER}; border-radius: 14px; background: {C_BG}; }}
+QGraphicsView {{ border: 1px solid {C_BORDER}; border-radius: 16px; background: {C_CANVAS}; }}
 
 QLabel#metric {{ font-size: 13px; color: {C_MUTED}; }}
-QLabel#metricValue {{ font-size: 15px; font-weight: 800; color: {C_TEXT}; }}
-QPlainTextEdit#terminal {{ font-family: "Cascadia Mono", "Consolas", monospace; font-size: 12px; }}
+QLabel#metricValue {{ font-size: 15px; font-weight: 850; color: {C_TEXT}; }}
+QPlainTextEdit#terminal {{
+    font-family: "Cascadia Mono", "Consolas", monospace; font-size: 12px;
+    background: {C_PANEL}; color: {C_TEXT}; border-color: {C_BORDER};
+}}
 """
 
 
@@ -316,7 +338,9 @@ class EdgeItem(QGraphicsPathItem):
         self.to_id = to_id
         self.setZValue(-1)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
-        self.setPen(QPen(QColor("#5b6275"), 2.5))
+        pen = QPen(QColor("#a0a8b8"), 2.4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        self.setPen(pen)
 
     def update_path(self, p1: QPointF, p2: QPointF) -> None:
         path = QPainterPath(p1)
@@ -327,7 +351,9 @@ class EdgeItem(QGraphicsPathItem):
 
     def paint(self, painter, option, widget=None) -> None:
         selected = self.isSelected()
-        self.setPen(QPen(QColor(C_ACCENT2 if selected else "#5b6275"), 3 if selected else 2.5))
+        pen = QPen(QColor(C_ACCENT if selected else "#a0a8b8"), 3.2 if selected else 2.4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        self.setPen(pen)
         super().paint(painter, option, widget)
 
 
@@ -347,7 +373,7 @@ class NodeItem(QGraphicsObject):
         self._delete_rect = QRectF(NODE_W - 28, 10, 20, 20)
 
     def boundingRect(self) -> QRectF:
-        return QRectF(-2, -2, NODE_W + 4, NODE_H + 4)
+        return QRectF(-9, -9, NODE_W + 18, NODE_H + 18)
 
     def input_pos(self) -> QPointF:
         return self.mapToScene(0, PORT_Y)
@@ -391,41 +417,51 @@ class NodeItem(QGraphicsObject):
         selected = node["id"] == self.editor.selected_id
         status = node.get("status", "idle") if enabled else "off"
         accent = QColor(STATUS_COLORS.get(status, C_MUTED))
+        node_color = QColor(NODE_TYPE_COLORS.get(node["type"], C_ACCENT2))
 
         body = QRectF(0, 0, NODE_W, NODE_H)
         path = QPainterPath()
-        path.addRoundedRect(body, 14, 14)
-        painter.setPen(QPen(QColor(C_ACCENT2 if selected else C_BORDER), 2 if selected else 1.2))
-        painter.setBrush(QBrush(QColor("#16223b" if enabled else "#10182a")))
+        path.addRoundedRect(body, 13, 13)
+
+        shadow_path = QPainterPath()
+        shadow_path.addRoundedRect(body.translated(0, 4), 13, 13)
+        shadow = QColor(17, 24, 39, 26 if enabled else 12)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.fillPath(shadow_path, QBrush(shadow))
+
+        painter.setPen(QPen(QColor(C_ACCENT if selected else C_BORDER), 2.2 if selected else 1.2))
+        painter.setBrush(QBrush(QColor(C_PANEL if enabled else "#f1f4f8")))
         painter.drawPath(path)
 
-        # left accent bar
-        bar = QPainterPath()
-        bar.addRoundedRect(QRectF(0, 0, 6, NODE_H), 3, 3)
-        painter.fillPath(bar, QBrush(accent))
+        # n8n-like node type badge.
+        icon_box = QRectF(15, 17, 40, 40)
+        icon_path = QPainterPath()
+        icon_path.addRoundedRect(icon_box, 12, 12)
+        icon_bg = QColor(node_color)
+        icon_bg.setAlpha(28 if enabled else 14)
+        painter.fillPath(icon_path, QBrush(icon_bg))
+        painter.setPen(QPen(node_color, 1.4))
+        painter.drawPath(icon_path)
 
-        # icon
-        painter.setFont(QFont("Segoe UI Emoji", 17))
-        painter.setPen(QColor(C_TEXT))
-        painter.drawText(QRectF(16, 14, 34, 34), Qt.AlignmentFlag.AlignCenter, NODE_ICONS.get(node["type"], "▪"))
+        self._paint_node_symbol(painter, icon_box.adjusted(8, 8, -8, -8), node["type"], node_color if enabled else QColor(C_MUTED))
 
         # title + subtitle
         painter.setPen(QColor(C_TEXT if enabled else C_MUTED))
-        painter.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
-        painter.drawText(QRectF(56, 18, NODE_W - 120, 22), Qt.AlignmentFlag.AlignVCenter, node["title"])
+        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        painter.drawText(QRectF(66, 18, NODE_W - 128, 22), Qt.AlignmentFlag.AlignVCenter, node["title"])
         painter.setPen(QColor(C_MUTED))
-        painter.setFont(QFont("Segoe UI", 9))
-        painter.drawText(QRectF(56, 42, NODE_W - 70, 18), Qt.AlignmentFlag.AlignVCenter, node.get("subtitle", ""))
+        painter.setFont(QFont("Segoe UI", 8))
+        painter.drawText(QRectF(66, 41, NODE_W - 86, 18), Qt.AlignmentFlag.AlignVCenter, node.get("subtitle", ""))
 
         # status pill
-        label = (node.get("status", "idle") if enabled else "off").upper()
-        painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        label = (node.get("status", "idle") if enabled else "off").capitalize()
+        painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
         pill_w = painter.fontMetrics().horizontalAdvance(label) + 18
-        pill = QRectF(56, 64, pill_w, 18)
+        pill = QRectF(66, 61, pill_w, 18)
         pp = QPainterPath()
         pp.addRoundedRect(pill, 9, 9)
         pc = QColor(accent)
-        pc.setAlpha(38)
+        pc.setAlpha(32)
         painter.fillPath(pp, QBrush(pc))
         painter.setPen(accent)
         painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, label)
@@ -441,17 +477,74 @@ class NodeItem(QGraphicsObject):
         self._paint_port(painter, QPointF(NODE_W, PORT_Y))
 
     def _paint_glyph(self, painter: QPainter, rect: QRectF, glyph: str, color: QColor) -> None:
-        painter.setFont(QFont("Segoe UI Symbol", 9))
+        painter.setFont(QFont("Segoe UI Symbol", 8))
         painter.setPen(color)
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, glyph)
 
+    def _paint_node_symbol(self, painter: QPainter, rect: QRectF, node_type: str, color: QColor) -> None:
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(color, 2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+        if node_type == "input":
+            painter.drawRoundedRect(QRectF(x + 2, y + 5, w - 4, h - 10), 4, 4)
+            play = QPainterPath()
+            play.moveTo(x + w * 0.42, y + h * 0.34)
+            play.lineTo(x + w * 0.42, y + h * 0.66)
+            play.lineTo(x + w * 0.68, y + h * 0.5)
+            play.closeSubpath()
+            painter.fillPath(play, QBrush(color))
+        elif node_type == "detector":
+            painter.drawEllipse(QRectF(x + 2, y + 2, w * 0.58, h * 0.58))
+            painter.drawLine(QPointF(x + w * 0.62, y + h * 0.62), QPointF(x + w - 2, y + h - 2))
+        elif node_type == "segmenter":
+            painter.drawEllipse(QRectF(x + 2, y + 3, 7, 7))
+            painter.drawEllipse(QRectF(x + 2, y + h - 10, 7, 7))
+            painter.drawLine(QPointF(x + 9, y + 8), QPointF(x + w - 2, y + h - 3))
+            painter.drawLine(QPointF(x + 9, y + h - 8), QPointF(x + w - 2, y + 3))
+        elif node_type == "classifier":
+            tag = QPainterPath()
+            tag.moveTo(x + 2, y + 5)
+            tag.lineTo(x + w * 0.62, y + 5)
+            tag.lineTo(x + w - 2, y + h * 0.5)
+            tag.lineTo(x + w * 0.62, y + h - 5)
+            tag.lineTo(x + 2, y + h - 5)
+            tag.closeSubpath()
+            painter.drawPath(tag)
+            painter.drawEllipse(QRectF(x + w * 0.55, y + h * 0.41, 3.5, 3.5))
+        elif node_type == "filter":
+            for yy, knob_x in ((y + 5, x + w * 0.35), (y + h * 0.5, x + w * 0.68), (y + h - 5, x + w * 0.48)):
+                painter.drawLine(QPointF(x + 2, yy), QPointF(x + w - 2, yy))
+                painter.setBrush(QBrush(color))
+                painter.drawEllipse(QPointF(knob_x, yy), 2.8, 2.8)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+        elif node_type == "preview":
+            painter.drawRoundedRect(QRectF(x + 2, y + 3, w - 4, h - 8), 3, 3)
+            painter.drawLine(QPointF(x + w * 0.38, y + h - 2), QPointF(x + w * 0.62, y + h - 2))
+        elif node_type == "alert":
+            bell = QPainterPath()
+            bell.moveTo(x + w * 0.22, y + h * 0.68)
+            bell.cubicTo(x + w * 0.26, y + h * 0.42, x + w * 0.3, y + h * 0.22, x + w * 0.5, y + h * 0.22)
+            bell.cubicTo(x + w * 0.7, y + h * 0.22, x + w * 0.74, y + h * 0.42, x + w * 0.78, y + h * 0.68)
+            painter.drawPath(bell)
+            painter.drawLine(QPointF(x + w * 0.18, y + h * 0.68), QPointF(x + w * 0.82, y + h * 0.68))
+            painter.drawEllipse(QPointF(x + w * 0.5, y + h * 0.8), 2, 2)
+        else:
+            painter.drawEllipse(rect.adjusted(3, 3, -3, -3))
+        painter.restore()
+
     def _paint_port(self, painter: QPainter, center: QPointF) -> None:
-        painter.setPen(QPen(QColor(C_BORDER), 2))
+        painter.setPen(QPen(QColor(C_BORDER_STRONG), 1.6))
         painter.setBrush(QBrush(QColor(C_PANEL)))
         painter.drawEllipse(center, PORT_R, PORT_R)
-        painter.setBrush(QBrush(QColor(C_ACCENT2)))
+        painter.setBrush(QBrush(QColor(C_ACCENT)))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(center, 3, 3)
+        painter.drawEllipse(center, 2.8, 2.8)
 
 
 class NodeEditor(QGraphicsView):
@@ -469,11 +562,34 @@ class NodeEditor(QGraphicsView):
         self._temp_edge: QGraphicsPathItem | None = None
 
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setSceneRect(0, 0, 1400, 900)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.rebuild()
+
+    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
+        painter.fillRect(rect, QColor(C_CANVAS))
+
+        major_step = 32
+        minor_step = 16
+        left = int(rect.left()) - (int(rect.left()) % minor_step)
+        top = int(rect.top()) - (int(rect.top()) % minor_step)
+        dot = QColor("#d5dbe7")
+        major_dot = QColor("#c4ccdb")
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        y = top
+        while y < rect.bottom():
+            x = left
+            while x < rect.right():
+                is_major = x % major_step == 0 and y % major_step == 0
+                painter.setBrush(QBrush(major_dot if is_major else dot))
+                painter.drawEllipse(QPointF(x, y), 1.15 if is_major else 0.8, 1.15 if is_major else 0.8)
+                x += minor_step
+            y += minor_step
 
     # -- building ---
     def rebuild(self) -> None:
@@ -615,7 +731,9 @@ class NodeEditor(QGraphicsView):
         if out_id is not None:
             self._connecting_from = out_id
             self._temp_edge = QGraphicsPathItem()
-            self._temp_edge.setPen(QPen(QColor(C_ACCENT), 2.5, Qt.PenStyle.DashLine))
+            pen = QPen(QColor(C_ACCENT), 2.5, Qt.PenStyle.DashLine)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            self._temp_edge.setPen(pen)
             self._temp_edge.setZValue(5)
             self.scene_obj.addItem(self._temp_edge)
             event.accept()
@@ -997,7 +1115,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self._build_topbar())
 
         body = QSplitter(Qt.Orientation.Horizontal)
-        body.setHandleWidth(8)
+        body.setHandleWidth(10)
         body.addWidget(self._build_palette())
         body.addWidget(self._build_canvas())
         body.addWidget(self._build_inspector_panel())
@@ -1007,7 +1125,7 @@ class MainWindow(QMainWindow):
         body.setSizes([220, 900, 340])
 
         main_split = QSplitter(Qt.Orientation.Vertical)
-        main_split.setHandleWidth(8)
+        main_split.setHandleWidth(10)
         main_split.addWidget(body)
         main_split.addWidget(self._build_terminal())
         main_split.setStretchFactor(0, 1)
@@ -1044,9 +1162,9 @@ class MainWindow(QMainWindow):
     def _build_topbar(self) -> QWidget:
         bar = QFrame()
         bar.setObjectName("topbar")
-        bar.setFixedHeight(64)
+        bar.setFixedHeight(58)
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(18, 0, 18, 0)
+        lay.setContentsMargins(14, 0, 16, 0)
         mark = QLabel("VN")
         mark.setObjectName("brandMark")
         title = QLabel("VisoNode")
@@ -1076,9 +1194,9 @@ class MainWindow(QMainWindow):
     def _build_palette(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panel")
-        panel.setFixedWidth(214)
+        panel.setFixedWidth(224)
         lay = QVBoxLayout(panel)
-        lay.setContentsMargins(12, 14, 12, 14)
+        lay.setContentsMargins(14, 16, 14, 14)
         lay.setSpacing(8)
         heading = QLabel("NODES")
         heading.setObjectName("panelHeading")
@@ -1100,18 +1218,21 @@ class MainWindow(QMainWindow):
     def _build_canvas(self) -> QWidget:
         wrap = QWidget()
         lay = QVBoxLayout(wrap)
-        lay.setContentsMargins(10, 12, 10, 10)
-        lay.setSpacing(8)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
 
         toolbar = QFrame()
         toolbar.setObjectName("panel")
         tlay = QHBoxLayout(toolbar)
-        tlay.setContentsMargins(16, 10, 16, 10)
-        wf = QLabel("Workflow")
+        tlay.setContentsMargins(16, 9, 16, 9)
+        wf = QLabel("AI vision workflow")
         wf.setStyleSheet("font-weight: 700;")
         self.status_label = QLabel("Idle")
         self.status_label.setStyleSheet(f"color: {C_MUTED};")
         tlay.addWidget(wf)
+        editor_badge = QLabel("Editor")
+        editor_badge.setObjectName("versionBadge")
+        tlay.addWidget(editor_badge)
         tlay.addWidget(self.status_label)
         tlay.addStretch(1)
         self.fps_label = self._metric("fps", "0")
@@ -1144,9 +1265,9 @@ class MainWindow(QMainWindow):
     def _build_inspector_panel(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panel")
-        panel.setMinimumWidth(300)
+        panel.setMinimumWidth(316)
         lay = QVBoxLayout(panel)
-        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setContentsMargins(16, 16, 16, 14)
         lay.setSpacing(10)
 
         head = QHBoxLayout()
@@ -1179,7 +1300,7 @@ class MainWindow(QMainWindow):
         panel = QFrame()
         panel.setObjectName("panel")
         lay = QVBoxLayout(panel)
-        lay.setContentsMargins(12, 10, 12, 12)
+        lay.setContentsMargins(14, 10, 14, 12)
         lay.setSpacing(8)
 
         header = QHBoxLayout()
